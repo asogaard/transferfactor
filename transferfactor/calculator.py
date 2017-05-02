@@ -14,6 +14,9 @@ import sys
 # Scientific import(s)
 try:
 
+    # ROOT
+    import ROOT
+
     # Numpy
     import numpy as np
     from root_numpy import *
@@ -31,6 +34,12 @@ except ImportError:
     pass
 
 # Local import(s)
+try:
+    from rootplotting import ap
+except:
+    print "WARNING: Needs 'rootplotting' package to produce plots."
+    sys.exit()
+    pass
 from utils import *
 
 
@@ -130,7 +139,7 @@ class calculator (object):
     # High-level method(s)
     # --------------------------------------------------------------------------
 
-    def fit (self):
+    def fit (self, theta=None):
         """ ... """
 
         # Check(s)
@@ -248,8 +257,17 @@ class calculator (object):
         # Perform fit
         if self._verbose: print "  Performing fit to TF profile"
         s_fit = np.power(w_fit, -1)
-        self._clf = GaussianProcess(theta0=5E-01, thetaL=1E-02, thetaU=1E+00, nugget=np.square(s_fit/(y_fit + eps)).ravel())
+        nugget = np.square(s_fit/(y_fit + eps)).ravel()
+        if theta is None:
+            # Using ML-optimised theta
+            self._clf = GaussianProcess(theta0=5E-01, thetaL=1E-02, thetaU=1E+00, nugget=nugget)
+        else:
+            # Using manually set theta
+            self._clf = GaussianProcess(theta0=theta, nugget=nugget)
+            pass
         self._clf.fit(X_fit, y_fit)
+
+        print "  Best value(s) of theta found:", self._clf.theta_
 
         # ...
 
@@ -304,7 +322,7 @@ class calculator (object):
         return TF_pred[idx2, idx1] + shift * TF_err[idx2, idx1]
 
 
-    def plot (self, show=True, save=False):
+    def plot (self, show=True, save=False, prefix=''):
         """ ... """
 
         # Check(s)
@@ -313,6 +331,10 @@ class calculator (object):
         if (not show) and (not save):
             print "Niether showing nor saving plot, so why bother making it."
             return
+
+
+        # (1) TF profile and residuals
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
         X1, X2 = np.meshgrid(*self._config['axes'])
 
@@ -338,7 +360,7 @@ class calculator (object):
         im2 = ax3.pcolormesh(X1, X2, TF_CR_pulls, vmin=-2, vmax=2, cmap='RdBu')
         _   = ax4.pcolormesh(X1, X2, TF_SR_pulls, vmin=-2, vmax=2, cmap='RdBu')
 
-        ax1.set_title(r'Data - W/Z (MC) profile', size=16)
+        ax1.set_title('TF profile', size=16) # r'Data - W/Z (MC) profile', size=16)
         ax2.set_title('GP fit', size=16)
         ax3.set_title('Fit region', size=16)
         if self._mass is not None:
@@ -362,8 +384,169 @@ class calculator (object):
         cbar_ax2 = fig.add_axes([0.88, 0.10, 0.04, 0.36])
         fig.colorbar(im1, cax=cbar_ax1).set_label(label=r'$N_{\mathrm{pass}}/N_{\mathrm{fail}}$', size=14)
         fig.colorbar(im2, cax=cbar_ax2).set_label(label='Residual pulls', size=14)
-        #if save: plt.savefig('tf_profiles_%d_pm%d.pdf' % ('spline' if
+        if save: plt.savefig('./' + prefix + 'profiles_%dGeV_pm%d.pdf' % (self._mass, self._window * 100.))
         if show: plt.show()
+
+
+        # (2) 1D pulls
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+        
+        bins = np.linspace(-10, 5, 30 + 1, endpoint=True)
+
+        c2 = ap.canvas(batch=not show)
+       
+        h_CR_pulls = c2.hist(TF_CR_pulls[(self._TF_CR_err > 0)], bins=bins, normalise=True, display=False)
+        h_SR_pulls = c2.hist(TF_SR_pulls[(self._TF_SR_err > 0)], bins=bins, normalise=True, display=False)
+
+        # Fitting
+        f_CR_pulls = ROOT.TF1('f_CR_pulls', 'gaus', -3, 3)
+        f_SR_pulls = ROOT.TF1('f_SR_pulls', 'gaus', -3, 3)
+        f_CR_pulls.SetLineColor(ROOT.kRed)
+        f_SR_pulls.SetLineColor(ROOT.kBlue)
+        f_CR_pulls.SetLineStyle(2)
+        f_SR_pulls.SetLineStyle(2)
+
+        h_CR_pulls.Fit('f_CR_pulls', 'QR+')
+        h_SR_pulls.Fit('f_SR_pulls', 'QR+')
+
+        # Drawing
+        h_CR_pulls = c2.hist(h_CR_pulls, linecolor=ROOT.kRed)
+        h_SR_pulls = c2.hist(h_SR_pulls, linecolor=ROOT.kBlue)
+
+        f_CR_pulls.DrawCopy('LC SAME')
+        f_SR_pulls.DrawCopy('LC SAME')
+        f_CR_pulls.SetLineColor(ROOT.kGray + 2)
+
+        c2.padding(0.5)
+
+        c2.xlabel("Transfer factor fit residual pull")
+        c2.ylabel("Number of bins (a.u.)")
+
+        c2.text(["#sqrt{s} = 13 TeV,  L = %.1f fb^{-1}" % (36.1),
+                 "Trimmed anti-k_{t}^{R=1.0} jets",
+                 "ISR #gamma selection",
+                 "Sherpa inclusive #gamma MC",
+                 "No mass window" if self._mass == 0 else \
+                     ("Window: m #in %2d GeV #pm %d%%" % (self._mass, self._window * 100.) if self._window == 0.3 else
+                      "Window: m #in %2d GeV #pm %d%%" % (self._mass, self._window * 100.)),
+                 ], qualifier='Simulation Internal')
+
+        # Legend
+        ymax = 0.60
+        xmin = 0.20
+        step = 0.05
+        legend = ROOT.TLegend(xmin, ymax - (4 if self._mass == 0 else 7) * step, 0.5, ymax)
+        legend.AddEntry(h_CR_pulls, "Fit region:",         'L')
+        legend.AddEntry(None,       "  Mean: #scale[0.5]{ }%.2f" % f_CR_pulls.GetParameter(1), '')
+        legend.AddEntry(None,       "  Width: %.2f" %              f_CR_pulls.GetParameter(2), '')
+        if self._mass > 0:
+            legend.AddEntry(h_SR_pulls, "Interp. region:", 'L')
+            legend.AddEntry(None,       "  Mean: #scale[0.5]{ }%.2f" % f_SR_pulls.GetParameter(1), '')
+            legend.AddEntry(None,       "  Width: %.2f" %              f_SR_pulls.GetParameter(2), '')
+            pass
+        legend.AddEntry(f_CR_pulls, "Central fit", 'L')
+        legend.Draw()
+
+        # Save/show
+        if save: c2.save('plots/closure_residuals_distributions_%dGeV_pm%d.pdf' % (self._mass, self._window * 100))
+        if show: c2.show()
+
+        
+        
+        ######################################################################
+        """
+        c3 = TCanvas('c3', "", 600, 600)
+
+        # -- Create and fill histograms
+        h_CR_pulls = TH1F('h_CR_pulls', "", 30, -10, 5)
+        h_SR_pulls = TH1F('h_SR_pulls', "", 30, -10, 5)
+
+        TF_CR_pulls = TF_CR_pulls[(TF_CR_err > 0)]
+        TF_SR_pulls = TF_SR_pulls[(TF_SR_err > 0)]
+
+        fill_hist(h_CR_pulls, TF_CR_pulls)
+        fill_hist(h_SR_pulls, TF_SR_pulls)
+
+        # -- Normalise
+        h_CR_pulls.Scale(1./h_CR_pulls.Integral())
+        if args.mass > 0:
+            h_SR_pulls.Scale(1./h_SR_pulls.Integral())
+            pass
+
+        # -- Fit
+        f_CR_pulls = TF1('f_CR_pulls', 'gaus', -3, 3)
+        f_SR_pulls = TF1('f_SR_pulls', 'gaus', -3, 3)
+        f_CR_pulls.SetLineColor(kRed)
+        f_SR_pulls.SetLineColor(kBlue)
+        f_CR_pulls.SetLineStyle(2)
+        f_SR_pulls.SetLineStyle(2)
+
+        h_CR_pulls.Fit('f_CR_pulls', 'QR')
+        h_SR_pulls.Fit('f_SR_pulls', 'QR')
+
+
+        # -- Style
+        h_CR_pulls.SetLineColor(kRed)
+        h_SR_pulls.SetLineColor(kBlue)
+
+        h_CR_pulls.GetXaxis().SetTitle("Transfer factor fit residual pull")
+        h_CR_pulls.GetYaxis().SetTitle("Bins (a.u.)")
+
+        h_CR_pulls.GetYaxis().SetRangeUser(0, 2 * h_CR_pulls.GetMaximum())
+
+        # -- Draw
+        h_CR_pulls.Draw('HIST')
+        f_CR_pulls.DrawCopy('LC SAME')
+        if args.mass > 0:
+            h_SR_pulls.Draw('HIST SAME')
+            f_SR_pulls.Draw('LC SAME')
+            pass
+        f_CR_pulls.SetLineColor(kGray + 2)
+
+        # -- Draw text
+        text = TLatex()
+
+        lines = [
+            "#scale[1.1]{#font[72]{ATLAS} }#scale[1.05]{Simulation Internal}",
+            "#sqrt{s} = 13 TeV,  L = %.1f fb^{-1}" % config['lumi'],
+            "Trimmed anti-k_{t}^{R=1.0} jets",
+            "ISR #gamma selection",
+            "Sherpa inclusive #gamma MC",
+            "No SR #cup VR mass window" if args.mass == 0 else \
+                ("SR #cup VR window: m #in %2d GeV #pm %d%%" % (args.mass, args.window * 100.) if args.window == 0.3 else
+                 "SR window: m #in %2d GeV #pm %d%%" % (args.mass, args.window * 100.)),
+            #("Splines" if args.spline else ("GP" if args.gp else "Kernel reg.")) + " fit",
+            ]
+
+        step = 0.05
+        ymax = 0.87
+        xmin = 0.20
+        for i, line in enumerate(lines):
+            text.DrawLatexNDC(xmin, ymax - i * step, line)
+            pass
+
+        # -- Draw legend
+        legend = TLegend(xmin, ymax - ((4 if args.mass == 0 else 7) + i + 1) * step, 0.5, ymax - (i + 1) * step)
+        legend.AddEntry(h_CR_pulls, "CR:",         'L')
+        legend.AddEntry(None,       "  Mean: #scale[0.5]{ }%.2f" % f_CR_pulls.GetParameter(1), '')
+        legend.AddEntry(None,       "  Width: %.2f" %              f_CR_pulls.GetParameter(2), '')
+        if args.mass > 0:
+            if args.window == 0.2:
+                legend.AddEntry(h_SR_pulls, "SR:", 'L')
+            else:
+                legend.AddEntry(h_SR_pulls, "SR #cup VR:", 'L')
+                pass
+            legend.AddEntry(None,       "  Mean: #scale[0.5]{ }%.2f" % f_SR_pulls.GetParameter(1), '')
+            legend.AddEntry(None,       "  Width: %.2f" %              f_SR_pulls.GetParameter(2), '')
+            pass
+        legend.AddEntry(f_CR_pulls, "Central fit", 'L')
+        legend.Draw()
+
+        c3.Update()
+
+        if args.save: c3.SaveAs('plots/closure_residuals_distributions_%s_%d_pm%d.pdf' % ('spline' if args.spline else ('gp' if args.gp else 'kernel'), args.mass, args.window * 100))
+        if args.show: wait()
+        """
         return
     
     pass
