@@ -218,12 +218,12 @@ class calculator (object):
         # ----------------------------------------------------------------------
 
         # Mesh
-        if self._verbose: print "  setting up grid for fitting"
+        if self._verbose: print "  Setting up grid for fitting"
         X1, X2 = np.meshgrid(*self._config['axes'])
         X = np.vstack((X1.ravel(), X2.ravel())).T
 
         # Mean- and error arrays
-        if self._verbose: print "  setting up mean- and error arrays"
+        if self._verbose: print "  Setting up mean- and error arrays"
         y = self._TF_CR_mean.ravel()
         s = self._TF_CR_err .ravel()
 
@@ -304,11 +304,15 @@ class calculator (object):
         return TF_pred[idx2, idx1] + shift * TF_err[idx2, idx1]
 
 
-    def plot (self, save=False):
+    def plot (self, show=True, save=False):
         """ ... """
 
         # Check(s)
         assert self._fitted, "Must have called 'fit' before 'plot'."
+
+        if (not show) and (not save):
+            print "Niether showing nor saving plot, so why bother making it."
+            return
 
         X1, X2 = np.meshgrid(*self._config['axes'])
 
@@ -359,7 +363,7 @@ class calculator (object):
         fig.colorbar(im1, cax=cbar_ax1).set_label(label=r'$N_{\mathrm{pass}}/N_{\mathrm{fail}}$', size=14)
         fig.colorbar(im2, cax=cbar_ax2).set_label(label='Residual pulls', size=14)
         #if save: plt.savefig('tf_profiles_%d_pm%d.pdf' % ('spline' if
-        plt.show()
+        if show: plt.show()
         return
     
     pass
