@@ -36,7 +36,7 @@ except ImportError:
 # Local import(s)
 try:
     from rootplotting import ap
-except:
+except ImportError:
     print "WARNING: Needs 'rootplotting' package to produce plots."
     sys.exit()
     pass
