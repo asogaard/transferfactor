@@ -147,7 +147,7 @@ class calculator (object):
 
         # -- Mass window
         assert (self._mass is None) == (self._window is None), "Both mass and window width must either be specified, or not."
-        assert (self._window is None) or (self._window < 1.), "Relative window width must be less than 100%%."
+        assert (self._window is None) or (self._window < 1.), "Relative window width must be less than 100%."
 
         # -- self._config
         assert self._config, "Need configuration to fit."
