@@ -260,7 +260,7 @@ class calculator (object):
         nugget = np.square(s_fit/(y_fit + eps)).ravel()
         if theta is None:
             # Using ML-optimised theta
-            self._clf = GaussianProcess(theta0=5E-01, thetaL=1E-02, thetaU=1E+00, nugget=nugget)
+            self._clf = GaussianProcess(theta0=[5E-01, 5E-01], thetaL=1E-02, thetaU=1E+00, nugget=nugget)
         else:
             # Using manually set theta
             self._clf = GaussianProcess(theta0=theta, nugget=nugget)
