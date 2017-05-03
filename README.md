@@ -1,5 +1,5 @@
 # transferfactor
-Python package for perform background estimation using 2D transfer factor (TF) method
+Python package for performing background estimation using 2D transfer factor (TF) method
 
 ## Quick start
 
