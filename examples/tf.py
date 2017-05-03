@@ -32,7 +32,7 @@ except ImportError:
 # Local include(s)
 try:
     import transferfactor as tf
-    from transferfactor.utils import make_directories
+    from transferfactor.utils import make_directories, check_make_dir
     from rootplotting import ap
     from rootplotting.tools import *
 except ImportError:
@@ -176,11 +176,8 @@ def main ():
 
     # Computing data-driven background estimate
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+    check_make_dir('output')
     
-    if not os.path.exists('output/'):
-        os.makedirs('output/')
-        pass
-
     # Write TF-scaled failing data to file
     output = ROOT.TFile('output/objdef_TF_{DSID:6d}.root'.format(DSID=DSID), 'RECREATE')
     
@@ -268,9 +265,8 @@ def main ():
     output.Close()
         
     # Save configuration
-    if not os.path.exists('logs/'):
-        os.makedirs('logs/')
-        pass
+    check_make_dir('logs')
+    
     # -- Turn numpy arrays into lists, in order to make them JSON serializable
     def make_serializable (iterable):
         """ Turn numpy arrays into lists, in order to make them JSON serializable. """

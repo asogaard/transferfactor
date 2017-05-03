@@ -335,6 +335,12 @@ class calculator (object):
             print "Niether showing nor saving plot, so why bother making it."
             return
 
+        # Try to create target directory, if necessary
+        dirs = prefix.split('/')
+        if len(dirs) > 1:
+            check_make_dir('/'.join(dirs[:-1]))
+            pass
+
 
         # (1) TF profile and residuals
         # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 

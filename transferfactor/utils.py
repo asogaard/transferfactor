@@ -9,7 +9,7 @@
 """
 
 # Basic
-import sys, itertools
+import sys, itertools, os
 
 # Scientific
 try:
@@ -27,6 +27,17 @@ except ImportError:
 
 
 eps = np.finfo(float).eps
+
+
+def warning (string):
+    print '\033[91m\033[1mWARNING\033[0m ' + string
+    return
+
+
+def error (string, e=Exception):
+    print '\033[91m\033[1mERROR\033[0m   ' + string
+    return
+
 
 def in_CR (data, mass, window):
     """ Return array indicating whether each jet is in the control region (CR). """
@@ -175,6 +186,18 @@ def make_directories (path, fromDir=None):
 
     return tdir
 
+def check_make_dir (path):
+    """ Check if a system directory exists, and create it if not. """
+    # Check(s)
+    if path.startswith('/'):
+        warning("Not accepting relative paths. Recieved: '%s'. Exiting" % path)
+        return
+
+    if not os.path.exists(path):
+        os.makedirs(path)
+        pass
+    return
+
 
 def fixHist (h, m, w):
     """ Remove bins that overlap with the SR/VR mass window.
@@ -191,13 +214,3 @@ def fixHist (h, m, w):
             pass
         pass
     return h
-
-
-def warning (string):
-    print '\033[91m\033[1mWARNING\033[0m ' + string
-    return
-
-
-def error (string, e=Exception):
-    print '\033[91m\033[1mERROR\033[0m   ' + string
-    return
