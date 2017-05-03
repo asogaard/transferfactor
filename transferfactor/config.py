@@ -13,13 +13,16 @@ import numpy as np
 config = {
 
     # Base path for input files
-    'base_path' : '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/outputObjdef/2017-04-27/',
+    'base_path' : 'data/', #'/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/outputObjdef/2017-04-27/',
 
     # Path to cross-sections file
-    'xsec_file' : '/afs/cern.ch/user/a/asogaard/Analysis/2016/BoostedJetISR/AnalysisTools/share/sampleInfo.csv',
+    'xsec_file' : 'sampleInfo.csv', #'/afs/cern.ch/user/a/asogaard/Analysis/2016/BoostedJetISR/AnalysisTools/share/sampleInfo.csv',
 
     # Name of tree from which to read input data
     'tree'      : 'BoostedJet+ISRgamma/Nominal/EventSelection/Pass/NumLargeRadiusJets/Postcut',
+
+    # Name of tree from which to read input data _afte_ tau21DDT cut
+    'finaltree' : 'BoostedJet+ISRgamma/Nominal/EventSelection/Pass/Jet_tau21DDT/Postcut',
 
     # Common prefix for branches in main tree; to be removed
     'prefix'    : 'Jet_',

@@ -150,7 +150,7 @@ def asyncPredict (clf, data, num_processes=10, batch_size=10000, quiet=False, ev
     return np.hstack(predictions)
 
 
-def make_directories(path, fromDir = None):
+def make_directories (path, fromDir=None):
     """ Create nested ROOT TDirectories (if necessary). """
     if fromDir is not None:
         fromDir.cd()
@@ -176,7 +176,7 @@ def make_directories(path, fromDir = None):
     return tdir
 
 
-def fixHist(h, m, w):
+def fixHist (h, m, w):
     """ Remove bins that overlap with the SR/VR mass window.
     @author: Laser Kaplan (@lkaplan)
     """

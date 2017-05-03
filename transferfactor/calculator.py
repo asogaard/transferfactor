@@ -325,6 +325,9 @@ class calculator (object):
     def plot (self, show=True, save=False, prefix=''):
         """ ... """
 
+        # Style
+        plt.style.use('ggplot')
+
         # Check(s)
         assert self._fitted, "Must have called 'fit' before 'plot'."
 
