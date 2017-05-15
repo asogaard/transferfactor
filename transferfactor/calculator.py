@@ -60,6 +60,8 @@ class calculator (object):
         self._partialbins = True
         self._emptybins = True
         self._fitted = False
+        self._fullfitted = False
+        self._shift = None
         return
 
 
@@ -135,6 +137,12 @@ class calculator (object):
         return
 
 
+    def theta (self):
+        """ The classifier 'theta' accessor """
+        return self._clf.theta_
+
+
+
 
     # High-level method(s)
     # --------------------------------------------------------------------------
@@ -194,7 +202,7 @@ class calculator (object):
             pass
 
         # Subtract MC component from data (opt.)
-        '''
+        #'''
         if self._subtract is not None:
             if self._verbose: print "  Subtracting component from pass-a nd fail histograms"
             print "  Subtracting component from pass and fail histograms"
@@ -204,7 +212,7 @@ class calculator (object):
             h_data_SR_pass.Add(h_sub_SR_pass, -1)
             h_data_SR_fail.Add(h_sub_SR_fail, -1)
             pass
-        '''
+        #'''
 
         # Compute ratio
         if self._verbose: print "  Getting TF ratio in SR and CR"
@@ -260,7 +268,7 @@ class calculator (object):
         nugget = np.square(s_fit/(y_fit + eps)).ravel()
         if theta is None:
             # Using ML-optimised theta
-            self._clf = GaussianProcess(theta0=[5E-01, 5E-01], thetaL=[1E-02, 1E-02], thetaU=[1E+00, 1E+00], nugget=nugget)
+            self._clf = GaussianProcess(theta0=[1E-01, 1E-01], thetaL=[1E-03, 1E-03], thetaU=[1E+01, 1E+01], nugget=nugget)
         else:
             # Using manually set theta
             self._clf = GaussianProcess(theta0=theta, nugget=nugget)
@@ -272,6 +280,73 @@ class calculator (object):
         # ...
 
         self._fitted = True
+        return
+
+
+    def fullfit (self):
+        """ Perform full, three-step fit as used in the di-jet + ISR search. """
+
+        # Check(s)
+        assert 'massbins' in self._config, "Need 'massbins' entry in config to perform full fit."
+
+        # Pass/fail masks
+        msk_data_pass = self._config['pass'](self._data)
+        msk_data_fail = ~msk_data_pass
+        
+        # -- First 20% fit
+        print "First 20% fit"
+        self.window = 0.2
+        self.fit()
+        theta = self.theta()
+        print "  -- Optimal theta for 20% fit:", theta
+
+        # -- 30% validation fit
+        print "30% validation fit"
+        self.window = 0.3
+        self.fit(theta=theta)
+        w_nom     = self.weights(self._data[msk_data_fail])
+        w_up      = self.weights(self._data[msk_data_fail], shift=+1)
+        w_down    = self.weights(self._data[msk_data_fail], shift=-1)
+        
+
+        # Compare data to estimate in VRs
+        c = ap.canvas(batch=True)
+        
+        bins = self._config['massbins']
+
+        # -- Main pad
+        h_est_nom  = c.hist(self._data['m'][msk_data_fail], bins=bins, weights=self._data['weight'][msk_data_fail] * w_nom,  display=False)
+        h_est_up   = c.hist(self._data['m'][msk_data_fail], bins=bins, weights=self._data['weight'][msk_data_fail] * w_up,   display=False)
+        h_est_down = c.hist(self._data['m'][msk_data_fail], bins=bins, weights=self._data['weight'][msk_data_fail] * w_down, display=False)
+        h_data     = c.plot(self._data['m'][msk_data_pass], bins=bins, weights=self._data['weight'][msk_data_pass],          display=False)
+
+        # -- Data/estimate agreement
+        bincentres = bins[:-1] + 0.5 * (bins[1] - bins[0])
+        a_data = hist2array(h_data)
+
+        a_est  = hist2array(h_est_nom)
+        a_stat = np.array(map(h_est_nom.GetBinError, range(1, h_est_nom.GetXaxis().GetNbins() + 1))).reshape(a_est.shape)
+
+        a_up   = hist2array(h_est_up)
+        a_down = hist2array(h_est_down)
+        a_syst = np.maximum(np.abs(a_up - a_est), np.abs(a_up - a_est))
+
+        msk_VR = (np.abs(bincentres - self._mass) / self._mass < 0.3) & \
+                 (np.abs(bincentres - self._mass) / self._mass > 0.2)
+        a_dev = np.abs(a_data - a_est) / np.sqrt(np.square(a_stat) + np.square(a_syst))
+        delta = np.mean(a_dev[msk_VR])
+
+        self._shift = max(1, delta)
+        print "  -- Data-estimate agreement in VRs:", delta, "-->", self._shift
+
+
+        # -- Second 20% fit
+        print "Second 20% fit"
+        self.window = 0.2
+        self.fit(theta=theta)
+        
+        # ...
+        self._fullfitted = True
         return
 
 
@@ -310,23 +385,33 @@ class calculator (object):
 
             # Get _approximate_ prediction for input data
             TF_pred, TF_err = asyncPredict(self._clf, mesh, quiet=True, eval_MSE=True, num_processes=1)
+            TF_pred = TF_pred.reshape(X1.shape)[idx2, idx1].ravel()
+            TF_err  = TF_err .reshape(X1.shape)[idx2, idx1].ravel()
             pass
 
         # Go from variance to r.m.s.
         TF_err = np.sqrt(TF_err)
 
-        TF_pred = TF_pred.reshape(X1.shape)
-        TF_err  = TF_err .reshape(X1.shape)
-
-        #return TF_pred + shift * TF_err
-        return TF_pred[idx2, idx1] + shift * TF_err[idx2, idx1]
+        return TF_pred + shift * TF_err
 
 
-    def plot (self, show=True, save=False, prefix=''):
+    def fullweights (self, data, exact=False):
+        """ Get transfer factor (TF) weights for data, after the possible inflation of the systematics using validation regions. """
+
+        # Check(s)
+        assert self._fullfitted, "Must have called 'fullfit' before 'fullweights'."
+
+        return self.weights(data, shift=0,            exact=exact), \
+               self.weights(data, shift=+self._shift, exact=exact), \
+               self.weights(data, shift=-self._shift, exact=exact)
+        
+
+    def plot (self, show=True, save=False, MC=True, prefix=''):
         """ ... """
 
         # Style
         plt.style.use('ggplot')
+        plt.close('all')
 
         # Check(s)
         assert self._fitted, "Must have called 'fit' before 'plot'."
@@ -374,6 +459,8 @@ class calculator (object):
         ax3.set_title('Fit region', size=16)
         if self._mass is not None:
             ax4.set_title(r'Interp. region: $m \in %.0f \pm %.0f$ GeV (%.0f%%)' % (self._mass, self._mass * self._window, 100. * self._window), size=16)
+        else:
+            ax4.set_title(r'Interp. region', size=16)
             pass
 
         for ax in [ax1, ax2, ax3, ax4]:
@@ -393,7 +480,7 @@ class calculator (object):
         cbar_ax2 = fig.add_axes([0.88, 0.10, 0.04, 0.36])
         fig.colorbar(im1, cax=cbar_ax1).set_label(label=r'$N_{\mathrm{pass}}/N_{\mathrm{fail}}$', size=14)
         fig.colorbar(im2, cax=cbar_ax2).set_label(label='Residual pulls', size=14)
-        if save: plt.savefig('./' + prefix + 'profiles_%dGeV_pm%d.pdf' % (self._mass, self._window * 100.))
+        if save: plt.savefig('./' + prefix + ('profiles_%dGeV_pm%d.pdf' % (self._mass, self._window * 100.) if self._mass else 'profiles_full.pdf'))
         if show: plt.show()
 
 
@@ -415,15 +502,17 @@ class calculator (object):
         f_CR_pulls.SetLineStyle(2)
         f_SR_pulls.SetLineStyle(2)
 
-        h_CR_pulls.Fit('f_CR_pulls', 'QR+')
-        h_SR_pulls.Fit('f_SR_pulls', 'QR+')
+        h_CR_pulls.Fit('f_CR_pulls', 'QR0+')
+        h_SR_pulls.Fit('f_SR_pulls', 'QR0+')
 
         # Drawing
         h_CR_pulls = c2.hist(h_CR_pulls, linecolor=ROOT.kRed)
-        h_SR_pulls = c2.hist(h_SR_pulls, linecolor=ROOT.kBlue)
+        h_SR_pulls = c2.hist(h_SR_pulls, linecolor=ROOT.kBlue, display=bool(self._mass))
 
         f_CR_pulls.DrawCopy('LC SAME')
-        f_SR_pulls.DrawCopy('LC SAME')
+        if self._mass is not None:
+            f_SR_pulls.DrawCopy('LC SAME')
+            pass
         f_CR_pulls.SetLineColor(ROOT.kGray + 2)
 
         c2.padding(0.5)
@@ -433,9 +522,9 @@ class calculator (object):
 
         c2.text(["#sqrt{s} = 13 TeV,  L = %.1f fb^{-1}" % (36.1),
                  "Trimmed anti-k_{t}^{R=1.0} jets",
-                 "ISR #gamma selection",
-                 "Sherpa inclusive #gamma MC",
-                 "No mass window" if self._mass == 0 else \
+                 "ISR #gamma selection"] +
+                 (["Sherpa inclusive #gamma MC"] if MC else []) +
+                 ["No mass window" if not self._mass else \
                      ("Window: m #in %2d GeV #pm %d%%" % (self._mass, self._window * 100.) if self._window == 0.3 else
                       "Window: m #in %2d GeV #pm %d%%" % (self._mass, self._window * 100.)),
                  ], qualifier='Simulation Internal')
@@ -444,11 +533,11 @@ class calculator (object):
         ymax = 0.60
         xmin = 0.20
         step = 0.05
-        legend = ROOT.TLegend(xmin, ymax - (4 if self._mass == 0 else 7) * step, 0.5, ymax)
+        legend = ROOT.TLegend(xmin, ymax - (4 if not self._mass else 7) * step, 0.5, ymax)
         legend.AddEntry(h_CR_pulls, "Fit region:",         'L')
         legend.AddEntry(None,       "  Mean: #scale[0.5]{ }%.2f" % f_CR_pulls.GetParameter(1), '')
         legend.AddEntry(None,       "  Width: %.2f" %              f_CR_pulls.GetParameter(2), '')
-        if self._mass > 0:
+        if self._mass:
             legend.AddEntry(h_SR_pulls, "Interp. region:", 'L')
             legend.AddEntry(None,       "  Mean: #scale[0.5]{ }%.2f" % f_SR_pulls.GetParameter(1), '')
             legend.AddEntry(None,       "  Width: %.2f" %              f_SR_pulls.GetParameter(2), '')
@@ -457,7 +546,7 @@ class calculator (object):
         legend.Draw()
 
         # Save/show
-        if save: c2.save('plots/closure_residuals_distributions_%dGeV_pm%d.pdf' % (self._mass, self._window * 100))
+        if save: c2.save('./' + prefix + ('residuals_distributions_%dGeV_pm%d.pdf' % (self._mass, self._window * 100) if self._mass else 'residuals_distributions.pdf'))
         if show: c2.show()
 
         return
