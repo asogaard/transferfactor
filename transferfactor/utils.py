@@ -9,7 +9,7 @@
 """
 
 # Basic
-import sys, itertools, os
+import sys, itertools, os, inspect
 
 # Scientific
 try:
@@ -186,6 +186,7 @@ def make_directories (path, fromDir=None):
 
     return tdir
 
+
 def check_make_dir (path):
     """ Check if a system directory exists, and create it if not. """
     # Check(s)
@@ -197,6 +198,61 @@ def check_make_dir (path):
         os.makedirs(path)
         pass
     return
+
+
+def make_serializable (iterable):
+    """ Turn numpy arrays into lists, lambda functions into text, in order to make them JSON serializable. """
+    result = iterable
+    if   type(result) == dict:
+        for key, element in result.iteritems():
+            result[key] = make_serializable(element)
+            pass
+    elif type(result) == list:
+        for idx, element in enumerate(result):
+            result[idx] = make_serializable(element)
+            pass
+    elif type(result).__module__.startswith(np.__name__):
+        result = result.tolist()
+    elif type(result).__name__ == 'function':
+        result = inspect.getsource(result)
+        pass
+    return result
+
+
+def get_signal_DSID (mass, tolerance=0):
+    """ From signal mass window midpoint, get DSID of corresponding signal sample. """
+
+    # Check(s)
+    #...
+
+    # Output
+    sig_DSID = None
+
+    # Get appropriate signal file 
+    theory_masses = [100, 130, 160, 190, 220]
+    theory_mass = None
+
+    for tm in theory_masses:
+        # Compare input mass to theory masses within 10 GeV
+        if abs(mass - tm) <= tolerance:
+            theory_mass = tm
+            break
+        pass
+
+    if theory_mass is None:
+        print "Requested mass does not have a signal sample. Exiting."
+        return sig_DSID
+
+    #sig_file = 'objdef_MC_{DSID:6d}.root'
+    if   theory_mass == 100: sig_DSID = 308363
+    elif theory_mass == 130: sig_DSID = 308364
+    elif theory_mass == 160: sig_DSID = 308365
+    elif theory_mass == 190: sig_DSID = 308366
+    elif theory_mass == 220: sig_DSID = 308367
+    else: 
+        print "This shouldn't happen... Exiting."
+        pass
+    return sig_DSID
 
 
 def fixHist (h, m, w):
