@@ -9,27 +9,25 @@
 @email:  andreas.sogaard@cern.ch
 """
 
-# Basic
+# Basic import(s)
 import sys, glob
 
 # Get ROOT to stop hogging the command-line options
 import ROOT
 ROOT.PyConfig.IgnoreCommandLineOptions = True
 
-# Scientific
+# Scientific import(s)
 try:
-    
     # Numpy
     import numpy as np
     from root_numpy import *
-    
 except ImportError:
     print "WARNING: One or more scientific python packages were not found. If you're in lxplus, try running:"
     print "         $ source /cvmfs/sft.cern.ch/lcg/views/LCG_88/x86_64-slc6-gcc49-opt/setup.sh"
     sys.exit()
     pass
 
-# Local include(s)
+# Local import(s)
 try:
     import transferfactor as tf
     from rootplotting import ap
@@ -52,20 +50,17 @@ parser.add_argument('--mass', dest='mass', type=int,
                     help='Center of excluded mass window')
 parser.add_argument('--window', dest='window', type=float,
                     default=0.2,
-                    help='Relative width of excluded mass window (default: 20%%)')
-parser.add_argument('--show', dest='show',  action='store_const',
+                    help='Relative width of excluded mass window (default: 0.2)')
+parser.add_argument('--show', dest='show', action='store_const',
                     const=True, default=False,
                     help='Show plots (default: False)')
-parser.add_argument('--save', dest='save',  action='store_const',
+parser.add_argument('--save', dest='save', action='store_const',
                     const=True, default=False,
                     help='Save plots (default: False)')
 
 
 # Main function.
 def main ():
-
-    # Check(s)
-    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
     # Parse command-line arguments
     args = parser.parse_args()
@@ -81,11 +76,8 @@ def main ():
         warning("No files found.")
         return
 
-    data = loadData(files, tf.config['tree']) 
+    data = loadData(files, tf.config['tree'], prefix=tf.config['prefix']) 
     info = loadData(files, tf.config['outputtree'], stop=1)
-
-    # Rename variables
-    data.dtype.names = [name.replace(tf.config['prefix'], '') for name in data.dtype.names] # @TODO: include in 'loadData(...)'?
 
     # Scaling by cross section
     xsec = loadXsec(tf.config['xsec_file'])
@@ -136,7 +128,8 @@ def main ():
         c = ap.canvas(num_pads=2, batch=not args.show)
         p0, p1 = c.pads()
 
-        bins = np.linspace(50, 300, 50 + 1, endpoint=True)
+        bins = tf.config['massbins']
+        
         h_bkg  = c.hist(data['m'][msk_fail], bins=bins, weights=data['weight'][msk_fail] * w_nom,
                         fillcolor=ROOT.kAzure + 7,
                         label='Background pred.')
@@ -178,7 +171,6 @@ def main ():
         if args.save: c.save('plots/closure_%dGeV_pm%d.pdf' % (args.mass, args.window * 100.))
         if args.show: c.show()
         pass
-
 
     return
 

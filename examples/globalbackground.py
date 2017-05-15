@@ -4,51 +4,89 @@
 """ Script for computing the global background shape (GBS) for the dijet + ISR analysis.
 
 @file:   globalbackground.py
-@date:   1 May 2017
 @author: Andreas Søgaard 
+@date:   1 May 2017
 @email:  andreas.sogaard@cern.ch
 """
 
-# Basic
+# Basic import(s)
 import sys, glob
 
-# Scientific import(s)
+# Get ROOT to stop hogging the command-line options
 import ROOT
-import numpy as np
-from root_numpy import *
+ROOT.PyConfig.IgnoreCommandLineOptions = True
+
+# Scientific import(s)
+try:
+    # Numpy
+    import numpy as np
+    from root_numpy import *
+except ImportError:
+    print "WARNING: One or more scientific python packages were not found. If you're in lxplus, try running:"
+    print "         $ source /cvmfs/sft.cern.ch/lcg/views/LCG_88/x86_64-slc6-gcc49-opt/setup.sh"
+    sys.exit()
+    pass
 
 # Local import(s)
-from rootplotting.tools import *
-from rootplotting import ap
+try:
+    import transferfactor as tf
+    from transferfactor.utils import get_signal_DSID
+    from rootplotting import ap
+    from rootplotting.tools import *
+except ImportError:
+    print "WARNING: This script uses the 'transferfactor' and 'rootplotting' packages. Clone them as e.g.:"
+    print "         $ git clone git@github.com:asogaard/transferfactor.git"
+    print "         $ git clone git@github.com:asogaard/rootplotting.git"
+    sys.exit()
+    pass
 
-import transferfactor as tf
+
+# Command-line arguments parser
+import argparse
+
+parser = argparse.ArgumentParser(description='Compute global background shape (GBS).')
+
+parser.add_argument('--mass', dest='mass', type=int,
+                    required=True,
+                    help='Center of excluded mass window')
+parser.add_argument('--show', dest='show', action='store_const',
+                    const=True, default=False,
+                    help='Show plots (default: False)')
+parser.add_argument('--save', dest='save', action='store_const',
+                    const=True, default=False,
+                    help='Save plots (default: False)')
+
 
 # Main function
 def main ():
     
+    # Parse command-line arguments
+    args = parser.parse_args()
+
 
     # Setup.
     # – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – 
 
+    # Get signal file
+    sig_DSID = get_signal_DSID(args.mass, tolerance=10)
+    if sig_DSID is None:
+        warning ("No signal file was found")
+        return
+    sig_file = 'objdef_MC_{DSID:6d}.root'.format(DSID=sig_DSID)
+
     # Load data
-    files  = glob.glob('data/objdef_MC_3610*.root') + ['data/objdef_MC_308365.root'] #  + glob.glob('data/objdef_MC_3054*.root') 
+    files  = glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root') + [tf.config['base_path'] + sig_file]
 
     if len(files) == 0:
         warning("No files found. Try to run:")
         warning(" $ source getSomeData.sh")
         return
 
-    tree   = 'BoostedJet+ISRgamma/Nominal/EventSelection/Pass/NumLargeRadiusJets/Postcut'
-    prefix = 'Jet_'
-
-    data = loadData(files, tree)
-    info = loadData(files, 'BoostedJet+ISRgamma/Nominal/outputTree', stop=1)
-
-    # Rename variables
-    data.dtype.names = [name.replace(prefix, '') for name in data.dtype.names]
+    data = loadData(files, tf.config['tree'], prefix=tf.config['prefix'])
+    info = loadData(files, tf.config['outputtree'], stop=1)
 
     # Scaling by cross section
-    xsec = loadXsec('sampleInfo.csv')
+    xsec = loadXsec(tf.config['xsec_file'])
     lumi = 36.1
 
     # Append new DSID field
@@ -63,7 +101,7 @@ def main ():
     # k-factors?
     data = append_fields(data, 'logpt', np.log(data['pt']))
     
-    msk_sig  = (data['DSID'] == 308365)
+    msk_sig  = (data['DSID'] == sig_DSID)
     msk_data = ~msk_sig
 
     signal = data[msk_sig]
@@ -81,24 +119,24 @@ def main ():
     msk_sig_pass = tf.config['pass'](signal)
 
     # Transfer factor calculator instance
-    calc = tf.calculator(data=data, config=tf.config) # incl
+    calc = tf.calculator(data=data, config=tf.config)
     
     # Nominal fit
     calc.fit()
-    w_nom  = calc.weights(data[msk_fail])
-    #calc.plot()
+    w_nom = calc.weights(data[msk_fail])
+    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/globalbackground_')
 
-    # 160 GeV +/- 20% fit
-    calc.mass = 160
+    # mass +/- 20% stripe fit
+    calc.mass   = args.mass
     calc.window = 0.2
     calc.fit()
-    w_160GeV = calc.weights(data[msk_fail])
+    w_stripe = calc.weights(data[msk_fail])
     
     
     # Get GBS
-    bins = np.linspace(50, 300, 50 + 1, endpoint=True)
+    bins = tf.config['massbins']
 
-    masses = [120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220]
+    masses = [100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220]
     dict_backgrounds = dict()
     ctemp = ap.canvas(batch=True)
     for mass in masses:
@@ -106,6 +144,7 @@ def main ():
         # Fit TF profile
         calc.mass = mass
         calc.fit()
+        if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/globalbackground_%dGeV_' % args.mass)
 
         # Get TF weights
         w = calc.weights(data[msk_fail])
@@ -124,38 +163,38 @@ def main ():
         backgrounds[idx,:] = dict_backgrounds[mass]
         pass
 
-    print backgrounds
-    print backgrounds.mean(axis=0), len(backgrounds.mean(axis=0))
-    print backgrounds.mean(axis=1), len(backgrounds.mean(axis=1))
+    #print backgrounds
+    #print backgrounds.mean(axis=0), len(backgrounds.mean(axis=0))
+    #print backgrounds.mean(axis=1), len(backgrounds.mean(axis=1))
 
     
     # Plotting
     # – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – 
-    #bins = np.linspace(50, 300, 25 + 1, endpoint=True)
     
     # Setup canvas
-    c = ap.canvas(num_pads=2)
+    c = ap.canvas(num_pads=2, batch=not args.show)
     p0, p1 = c.pads()
 
     # Add stacked backgrounds
     h_bkg_nom    = c.stack(data  ['m'][msk_fail],     bins=bins, weights=data  ['weight'][msk_fail] * w_nom,    fillcolor=ROOT.kAzure  + 7, label="Bkg. (Nom.)")
-    h_sig        = c.stack(signal['m'][msk_sig_pass], bins=bins, weights=signal['weight'][msk_sig_pass],        fillcolor=ROOT.kRed    + 1, label="Z' (160 GeV)")
-    h_bkg_160GeV = c.hist (data  ['m'][msk_fail],     bins=bins, weights=data  ['weight'][msk_fail] * w_160GeV, linecolor=ROOT.kGreen  + 1, label="Bkg. (160 GeV #pm 20%)")
+    h_sig        = c.stack(signal['m'][msk_sig_pass], bins=bins, weights=signal['weight'][msk_sig_pass],        fillcolor=ROOT.kRed    + 1, label="Z' (%d GeV)" % args.mass)
+    h_bkg_stripe = c.hist (data  ['m'][msk_fail],     bins=bins, weights=data  ['weight'][msk_fail] * w_stripe, linecolor=ROOT.kGreen  + 1, label="Bkg. (%d GeV #pm 20%%)" % args.mass)
     h_gbs        = c.hist(backgrounds.mean(axis=0),   bins=bins,                                                linecolor=ROOT.kViolet + 1, label="Bkg. (GBS)")
     
     # Draw stats. error of stacked sum
-    h_sum  = h_bkg_nom.Clone('h_sum') #c.getStackSum()
-    c.hist(h_sum, fillstyle=3245, fillcolor=ROOT.kGray+2, linecolor=ROOT.kGray + 3, label='Stats. uncert.', option='E2')
+    h_sum = h_bkg_nom.Clone('h_sum') #c.getStackSum()
+    h_sum = c.hist(h_sum, fillstyle=3245, fillcolor=ROOT.kGray+2, linecolor=ROOT.kGray + 3, label='Stats. uncert.', option='E2')
     
     # Add (pseudo-) data
     np.random.seed(21)
     h_data = c.plot (data['m'][msk_pass], bins=bins, weights=data['weight'][msk_pass], markersize=0.8, label='Pseudo-data', scale=1)
 
     # Draw error- and ratio plots
+    hr_sig  = c.ratio_plot((h_sig,       h_bkg_nom), option='HIST', offset=1)
     h_err   = c.ratio_plot((h_sum,       h_bkg_nom), option='E2')
     h_ratio = c.ratio_plot((h_data,      h_bkg_nom), markersize=0.8)
     h_rgbs  = c.ratio_plot((h_gbs,       h_bkg_nom), linecolor=ROOT.kViolet + 1, option='HIST ][')
-    h_rgbs  = c.ratio_plot((h_bkg_160GeV,h_bkg_nom), linecolor=ROOT.kGreen  + 1, option='HIST ][')
+    h_rgbs  = c.ratio_plot((h_bkg_stripe,h_bkg_nom), linecolor=ROOT.kGreen  + 1, option='HIST ][')
     
     # Add labels and text
     c.xlabel('Signal jet mass [GeV]')
@@ -180,8 +219,8 @@ def main ():
     c.legend()
 
     # Save and show plot
-    c.save('gbs.pdf')
-    c.show()
+    if args.save: c.save('plots/globalbackground_spectrum_%dGeV.pdf' % args.mass)
+    if args.show: c.show()
     return
 
 

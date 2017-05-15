@@ -9,30 +9,28 @@
 @email:  andreas.sogaard@cern.ch
 """
 
-# Basic
-import sys, os, glob, json, inspect
+# Basic import(s)
+import sys, os, glob, json
 
 # Get ROOT to stop hogging the command-line options
 import ROOT
 ROOT.PyConfig.IgnoreCommandLineOptions = True
 
-# Scientific
+# Scientific import(s)
 try:
-    
     # Numpy
     import numpy as np
     from root_numpy import *
-    
 except ImportError:
     print "WARNING: One or more scientific python packages were not found. If you're in lxplus, try running:"
     print "         $ source /cvmfs/sft.cern.ch/lcg/views/LCG_88/x86_64-slc6-gcc49-opt/setup.sh"
     sys.exit()
     pass
 
-# Local include(s)
+# Local import(s)
 try:
     import transferfactor as tf
-    from transferfactor.utils import make_directories, check_make_dir
+    from transferfactor.utils import make_directories, check_make_dir, make_serializable, get_signal_DSID
     from rootplotting import ap
     from rootplotting.tools import *
 except ImportError:
@@ -48,106 +46,113 @@ import argparse
 
 parser = argparse.ArgumentParser(description='Produce TF-estimated background files.')
 
-#parser.add_argument('files', metavar='files', type=str, nargs='+',
-#                    help='Files to combine')
-#parser.add_argument('--DSID', dest='DSID', type=int,
-#                    required=True,
-#                    help='Pseudo dataset ID assigned to output')
 parser.add_argument('--mass', dest='mass', type=int,
                     required=True,
                     help='Center of excluded mass window')
 parser.add_argument('--window', dest='window', type=float,
-                    default=0.2,
-                    help='Relative width of excluded mass window (default: 20%%)')
+                    default=None,
+                    help='Width of excluded mass window (default: None)')
 parser.add_argument('--tau21DDT', dest='tau21DDT', type=float,
                     default=0.5,
                     help='Value of tau21DDT cut (default: 0.5)')
-#parser.add_argument('--gamma', dest='gamma', type=float,
-#                    default=1E-05,
-#                    help='Kernel regression length scale (default: 1E-05)')
-#parser.add_argument('--xsec_file', dest='xsec_file',
-#                    default='../AnalysisTools/share/sampleInfo.csv',
-#                    help='Path to cross-sections file (default: ../AnalysisTools/share/sampleInfo.csv)')
-parser.add_argument('--show', dest='show',  action='store_const',
+parser.add_argument('--show', dest='show', action='store_const',
                     const=True, default=False,
                     help='Show plots (default: False)')
-parser.add_argument('--save', dest='save',  action='store_const',
+parser.add_argument('--save', dest='save', action='store_const',
                     const=True, default=False,
                     help='Save plots (default: False)')
-#parser.add_argument('--spline', dest='spline',  action='store_const',
-#                    const=True, default=False,
-#                    help='Use spline regression (default: False)')
-#parser.add_argument('--gp', dest='gp',  action='store_const',
-#                    const=True, default=False,
-#                    help='Use gp regression (default: False)')
-#parser.add_argument('--partialbins', dest='partialbins',  action='store_const',
-#                    const=True, default=False,
-#                    help='Use partially filled bins (default: False)')
-#parser.add_argument('--emptybins', dest='emptybins',  action='store_const',
-#                    const=True, default=False,
-#                    help='Use empty bins (default: False)')
-parser.add_argument('--subtractWZdata', dest='subtractWZdata',  action='store_const',
+parser.add_argument('--subtractWZdata', dest='subtractWZdata', action='store_const',
                     const=True, default=False,
                     help='Subtract estimated W/Z fail component from data (default: False)')
+parser.add_argument('--subtractWZMC', dest='subtractWZMC', action='store_const',
+                    const=True, default=False,
+                    help='Subtract W/Z MC from TF profile (default: False)')
 
 
 # Main function.
 def main ():
 
-    # Check(s)
-    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
-
     # Parse command-line arguments
     args = parser.parse_args()
 
-    DSID = int("1%02d%03d" % (args.window * 100, args.mass))
+    #DSID = int("1%02d%03d" % (args.window * 100, args.mass))
+    DSID = int("1%02d%03d" % (0 if args.window is None else args.window * 100, args.mass))
     
 
     # Setup.
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
+    # Get signal file
+    sig_DSID = get_signal_DSID(args.mass)
+
     # Load data
     files_data = glob.glob(tf.config['base_path'] + 'objdef_data_*.root')
     files_WZ   = glob.glob(tf.config['base_path'] + 'objdef_MC_30543*.root') + \
                  glob.glob(tf.config['base_path'] + 'objdef_MC_30544*.root')    
+    if sig_DSID is None:
+        print "Assuming signal is W/Z"
+        files_sig = files_WZ    
+        files_WZ  = []
+    else:
+        sig_file = 'objdef_MC_{DSID:6d}.root'.format(DSID=sig_DSID)
+        print "Using signal file: %s" % sig_file
+        files_sig = [tf.config['base_path'] + sig_file]
+        pass
 
-    if len(files_data) == 0 or len(files_WZ) == 0:
+    if len(files_data) == 0 or len(files_sig) == 0:
         warning("No files found.")
         return
 
-    data      = loadData(files_data, tf.config['tree']) 
-    WZ        = loadData(files_WZ,   tf.config['tree']) 
+    data      = loadData(files_data, tf.config['tree'], prefix=tf.config['prefix']) 
+    signal    = loadData(files_sig,  tf.config['tree'], prefix=tf.config['prefix']) 
+    WZ        = loadData(files_WZ,   tf.config['tree'], prefix=tf.config['prefix']) 
     info_data = loadData(files_data, tf.config['outputtree'], stop=1)
+    info_sig  = loadData(files_sig,  tf.config['outputtree'], stop=1)
     info_WZ   = loadData(files_WZ,   tf.config['outputtree'], stop=1)
-
-    
-    # Rename variables
-    for arr in [data, WZ]:
-        arr.dtype.names = [name.replace(tf.config['prefix'], '') for name in arr.dtype.names] # @TODO: include in 'loadData(...)'?
-        pass
     
     # Scaling by cross section
     xsec = loadXsec(tf.config['xsec_file'])
 
+    # ----------------------------------------------------
+    # Make more elegant!
+    # ----------------------------------------------------
     # Append new DSID field # @TODO: Make more elegant?
-    WZ = append_fields(WZ, 'DSID', np.zeros((WZ.size,)), dtypes=int)
-    for idx in info_WZ['id']:    
-        msk = (WZ['id'] == idx) # Get mask of all 'data' entries with same id, i.e. from same file
-        tmp_DSID = info_WZ['DSID'][idx]  # Get DSID for this file
-        WZ['weight'][msk] *= xsec[tmp_DSID] # Scale by cross section x filter eff. for this DSID
-        WZ['DSID']  [msk] = tmp_DSID        # Store DSID
+    #for arr, info in zip([signal, WZ], [info_sig, info_WZ]):
+    if signal is not None:
+        signal = append_fields(signal, 'DSID', np.zeros((signal.size,)), dtypes=int)
+        for idx in info_sig['id']:    
+            msk = (signal['id'] == idx) # Get mask of all 'data' entries with same id, i.e. from same file
+            tmp_DSID = info_sig['DSID'][idx]  # Get DSID for this file
+            signal['weight'][msk] *= xsec[tmp_DSID] # Scale by cross section x filter eff. for this DSID
+            signal['DSID']  [msk] = tmp_DSID        # Store DSID
+            pass
+        # @TODO: k-factors?
+        signal['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
         pass
-    # @TODO: k-factors?
-    WZ['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
+
+    if WZ is not None:
+        signal = append_fields(WZ, 'DSID', np.zeros((WZ.size,)), dtypes=int)
+        for idx in info_WZ['id']:    
+            msk = (WZ['id'] == idx) # Get mask of all 'data' entries with same id, i.e. from same file
+            tmp_DSID = info_WZ['DSID'][idx]  # Get DSID for this file
+            WZ['weight'][msk] *= xsec[tmp_DSID] # Scale by cross section x filter eff. for this DSID
+            WZ['DSID']  [msk] = tmp_DSID        # Store DSID
+            pass
+        # @TODO: k-factors?
+        WZ['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
+        pass
 
     # Check output.
-    if data.size == 0:
-        warning("No data was loaded.")
+    if data.size == 0 or signal.size == 0:
+        warning("No data was loaded. Exiting.")
         return 
 
     # Compute new variables
-    data = append_fields(data, 'logpt', np.log(data['pt']))
-    WZ   = append_fields(WZ,   'logpt', np.log(WZ  ['pt']))
+    data   = append_fields(data,   'logpt', np.log(data  ['pt']))
+    signal = append_fields(signal, 'logpt', np.log(signal['pt']))
+    if WZ is not None:
+        WZ = append_fields(WZ,     'logpt', np.log(WZ    ['pt']))
+        pass
     
 
     # Transfer factor
@@ -156,24 +161,69 @@ def main ():
     # Pass/fail masks
     msk_data_pass = tf.config['pass'](data)
     msk_data_fail = ~msk_data_pass
-    msk_WZ_pass   = tf.config['pass'](WZ)
-    msk_WZ_fail   = ~msk_WZ_pass
+    msk_sig_pass  = tf.config['pass'](signal)
+    msk_sig_fail  = ~msk_sig_pass
+    if WZ is not None:
+        msk_WZ_pass   = tf.config['pass'](WZ)
+        msk_WZ_fail   = ~msk_WZ_pass
+        pass
 
-    # Transfer factor calculator instance
-    calc = tf.calculator(data=data, config=tf.config) # Using default configuration
-    calc.mass   = args.mass
-    calc.window = args.window
-    # ... calc.partialbins, calc.emptybins, ...
-    calc.fit() # ...(theta=0.5)
-    w_nom     = calc.weights(data[msk_data_fail])
-    w_up      = calc.weights(data[msk_data_fail], shift=+1)
-    w_down    = calc.weights(data[msk_data_fail], shift=-1)
-    w_WZ_nom  = calc.weights(WZ  [msk_WZ_fail])
-    w_WZ_up   = calc.weights(WZ  [msk_WZ_fail], shift=+1)
-    w_WZ_down = calc.weights(WZ  [msk_WZ_fail], shift=-1)
-    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/tf_')
     
+    calc = tf.calculator(data=data, config=tf.config, subtract=WZ if args.subtractWZMC else None) # Using default configuration
+    calc.mass = args.mass
 
+    # 30% window plot
+    calc.window = 0.3
+    calc.fit()
+    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/tf_', MC=False)
+
+    # Perform full fit
+    if args.window is None:
+        calc.fullfit()
+       
+        print "  -- Computing data weights"
+        w_nom,     w_up,     w_down      = calc.fullweights(data  [msk_data_fail])
+        print "  -- Computing signal weights"
+        w_sig_nom, w_sig_up, w_sig_down  = calc.fullweights(signal[msk_sig_fail])
+        if WZ is not None:
+            print "  -- Computing W/Z weights"
+            w_WZ_nom, w_WZ_up, w_WZ_down = calc.fullweights(WZ    [msk_WZ_fail])
+        else:
+            w_WZ_nom, w_WZ_up, w_WZ_down = None, None, None
+            pass
+        print "  -- Final fit done"
+        if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/tf_', MC=False)
+
+    # Perform fit with manually-set window size
+    else:    
+        # @TODO: - Forcing the fit to use same length scale as 20% window fit. Improve?
+        calc.window = 0.2
+        calc.fit()
+        theta = calc.theta()
+        calc.window = args.window
+        calc.fit(theta=theta)
+       
+        print "  -- Computing data weights"
+        w_nom  = calc.weights(data[msk_data_fail])
+        w_up   = calc.weights(data[msk_data_fail], shift=+1)
+        w_down = calc.weights(data[msk_data_fail], shift=-1)
+        print "  -- Computing signal weights"
+        w_sig_nom  = calc.weights(signal[msk_sig_fail])
+        w_sig_up   = calc.weights(signal[msk_sig_fail], shift=+1)
+        w_sig_down = calc.weights(signal[msk_sig_fail], shift=-1)
+        if WZ is not None:
+            print "  -- Computing W/Z weights"
+            w_WZ_nom, = calc.weights(WZ[msk_WZ_fail])
+            w_WZ_up   = calc.weights(WZ[msk_WZ_fail], shift=+1)
+            w_WZ_down = calc.weights(WZ[msk_WZ_fail], shift=-1)
+        else:
+            w_WZ_nom, w_WZ_up, w_WZ_down = None, None, None
+            pass
+        print "  -- Manual fit done"
+        if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/tf_', MC=False)
+        pass
+    
+    
     # Computing data-driven background estimate
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
     check_make_dir('output')
@@ -181,7 +231,9 @@ def main ():
     # Write TF-scaled failing data to file
     output = ROOT.TFile('output/objdef_TF_{DSID:6d}.root'.format(DSID=DSID), 'RECREATE')
     
-    for shift, w, w_WZ in zip([0, 1, -1], [w_nom, w_up, w_down], [w_WZ_nom, w_WZ_up, w_WZ_down]):
+    for shift, w, w_WZ in zip([0,        1,       -1], 
+                              [w_nom,    w_up,    w_down], 
+                              [w_WZ_nom, w_WZ_up, w_WZ_down]):
         
         # -- Get branch name for current variation
         var_name = 'Nominal' if shift == 0 else ('TF_UP' if shift == 1 else 'TF_DOWN')
@@ -190,10 +242,15 @@ def main ():
         vector_m = data['m']     [msk_data_fail]
         vector_w = data['weight'][msk_data_fail] * w
         if args.subtractWZdata:
-            print "  Subtracting TF-scaled W/Z MC from background estimate"
-            vector_m = np.concatenate((vector_m,   WZ['m']     [msk_WZ_fail]))
-            vector_w = np.concatenate((vector_w, - WZ['weight'][msk_WZ_fail] * w_WZ))
+            if WZ is not None and WZ.size > 0:
+                print "  Subtracting TF-scaled W/Z MC from background estimate"
+                vector_m = np.concatenate((vector_m,   WZ['m']     [msk_WZ_fail]))
+                vector_w = np.concatenate((vector_w, - WZ['weight'][msk_WZ_fail] * w_WZ))
+            else:
+                warning("  Could not subtract failed, TF-scale W/Z MC component")
+                pass
             pass
+        # Note: Don't subtract the signal component; that's output as a separate histogram to be used in the simultaneous fit
         
         # -- Prepare DISD and isMC vectors
         vector_DSID = np.ones_like(vector_w) * DSID
@@ -208,7 +265,7 @@ def main ():
                                    ('isMC', np.bool_)])
         
         # Mass and weight branch
-        print "  Writing arrays to file " + ("(%s)" % ("up" if shift == 1 else "down") if shift != 0 else "")
+        print "  Writing arrays to file: %s" % var_name
         treename1 = tf.config['tree'].replace('NumLargeRadiusJets', 'Jet_tau21DDT').replace('Nominal', var_name)
         make_directories('/'.join(treename1.split('/')[:-1]), fromDir=output)
         tree1 = array2tree(array1, name=treename1.split('/')[-1])
@@ -225,16 +282,16 @@ def main ():
         
 
     # Write TF-scaled failing W/Z MC to file
-    output = ROOT.TFile('output/objdef_TF_{DSID:6d}_WZfail.root'.format(DSID=DSID), 'RECREATE')
+    output = ROOT.TFile('output/objdef_TF_{DSID:6d}_signalfail.root'.format(DSID=DSID), 'RECREATE')
     
-    for shift, w_WZ in zip([0, 1, -1], [w_WZ_nom, w_WZ_up, w_WZ_down]):
+    for shift, w_sig in zip([0, 1, -1], [w_sig_nom, w_sig_up, w_sig_down]):
                
         # -- Get branch name for current variation
         var_name = 'Nominal' if shift == 0 else ('TF_UP' if shift == 1 else 'TF_DOWN')
 
         # -- Prepare mass- and weight vectors
-        vector_m = WZ['m']     [msk_WZ_fail]
-        vector_w = WZ['weight'][msk_WZ_fail] * w_WZ
+        vector_m = signal['m']     [msk_sig_fail]
+        vector_w = signal['weight'][msk_sig_fail] * w_sig
         
         # -- Prepare DISD and isMC vectors
         vector_DSID = np.ones_like(vector_w) * DSID
@@ -249,7 +306,7 @@ def main ():
                                    ('isMC', np.bool_)])
         
         # Mass and weight branch
-        print "  Writing arrays to file " + ("(%s)" % ("up" if shift == 1 else "down") if shift != 0 else "")
+        print "  Writing arrays to file: %s" % var_name
         treename1 = tf.config['tree'].replace('NumLargeRadiusJets', 'Jet_tau21DDT').replace('Nominal', var_name)
         make_directories('/'.join(treename1.split('/')[:-1]), fromDir=output)
         tree1 = array2tree(array1, name=treename1.split('/')[-1])
@@ -268,28 +325,9 @@ def main ():
     check_make_dir('logs')
     
     # -- Turn numpy arrays into lists, in order to make them JSON serializable
-    def make_serializable (iterable):
-        """ Turn numpy arrays into lists, in order to make them JSON serializable. """
-        result = iterable
-        if   type(result) == dict:
-            for key, element in result.iteritems():
-                result[key] = make_serializable(element)
-                pass
-        elif type(result) == list:
-            for idx, element in enumerate(result):
-                result[idx] = make_serializable(element)
-                pass
-        elif type(result).__module__.startswith(np.__name__):
-            result = result.tolist()
-        elif type(result).__name__ == 'function':
-            result = inspect.getsource(result)
-            pass
-        return result
-
     cfg = make_serializable(tf.config)
 
     json.dump([cfg, vars(args)], open('logs/tf_config_%d.log' % DSID, 'w'))        
-
     return
 
 

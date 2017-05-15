@@ -9,29 +9,28 @@
 @email:  andreas.sogaard@cern.ch
 """
 
-# Basic
+# Basic import(s)
 import sys, glob
 
 # Get ROOT to stop hogging the command-line options
 import ROOT
 ROOT.PyConfig.IgnoreCommandLineOptions = True
 
-# Scientific
+# Scientific import(s)
 try:
-    
     # Numpy
     import numpy as np
     from root_numpy import *
-    
 except ImportError:
     print "WARNING: One or more scientific python packages were not found. If you're in lxplus, try running:"
     print "         $ source /cvmfs/sft.cern.ch/lcg/views/LCG_88/x86_64-slc6-gcc49-opt/setup.sh"
     sys.exit()
     pass
 
-# Local include(s)
+# Local import(s)
 try:
     import transferfactor as tf
+    from transferfactor.utils import get_signal_DSID
     from rootplotting import ap
     from rootplotting.tools import *
 except ImportError:
@@ -50,25 +49,22 @@ parser = argparse.ArgumentParser(description='Perform signal injection test.')
 parser.add_argument('--mass', dest='mass', type=int,
                     required=True,
                     help='Center of excluded mass window')
-parser.add_argument('--window', dest='window', type=float,
-                    default=0.2,
-                    help='Relative width of excluded mass window (default: 20%%)')
-parser.add_argument('--show', dest='show',  action='store_const',
+#parser.add_argument('--window', dest='window', type=float,
+#                    default=0.2,
+#                    help='Relative width of excluded mass window (default: 0.2)')
+parser.add_argument('--show', dest='show', action='store_const',
                     const=True, default=False,
                     help='Show plots (default: False)')
-parser.add_argument('--save', dest='save',  action='store_const',
+parser.add_argument('--save', dest='save', action='store_const',
                     const=True, default=False,
                     help='Save plots (default: False)')
-parser.add_argument('--inject', dest='inject',  action='store_const',
+parser.add_argument('--inject', dest='inject', action='store_const',
                     const=True, default=False,
                     help='Inject signal (default: False)')
 
 
 # Main function.
 def main ():
-
-    # Check(s)
-    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
     # Parse command-line arguments
     args = parser.parse_args()
@@ -77,42 +73,21 @@ def main ():
     # Setup.
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
-    # Get appropriate signal file 
-    theory_masses = [100, 130, 160, 190]
-    theory_mass = None
-
-    for tm in theory_masses:
-        # Compare input mass to theory masses within 10 GeV
-        if abs(args.mass - tm) <= 10.:
-            theory_mass = tm
-            break
-        pass
-
-    if theory_mass is None:
-        print "Requested mass does not have a signal sample. Existing."
+    # Get signal file
+    sig_DSID = get_signal_DSID(args.mass, tolerance=10)
+    if sig_DSID is None:
         return
-
-    sig_file = 'objdef_MC_{DSID:6d}.root'
-    if   theory_mass == 100: sig_DSID = 308363
-    elif theory_mass == 130: sig_DSID = 308364
-    elif theory_mass == 160: sig_DSID = 308365
-    elif theory_mass == 190: sig_DSID = 308366
-    else: 
-        print "Requested mass does not have a signal sample. Existing."
-        return
+    sig_file = 'objdef_MC_{DSID:6d}.root'.format(DSID=sig_DSID)
 
     # Load data
-    files = glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root') + [tf.config['base_path'] + sig_file.format(DSID=sig_DSID)]
+    files = glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root') + [tf.config['base_path'] + sig_file]
 
     if len(files) == 0:
         warning("No files found.")
         return
 
-    data = loadData(files, tf.config['tree']) 
+    data = loadData(files, tf.config['tree'], prefix=tf.config['prefix']) 
     info = loadData(files, tf.config['outputtree'], stop=1)
-
-    # Rename variables
-    data.dtype.names = [name.replace(tf.config['prefix'], '') for name in data.dtype.names] # @TODO: include in 'loadData(...)'?
 
     # Scaling by cross section
     xsec = loadXsec(tf.config['xsec_file'])
@@ -149,25 +124,23 @@ def main ():
     # Transfer factor
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
+    calc = tf.calculator(data=data, config=tf.config) # Using default configuration
+    calc.mass = args.mass
+    calc.fullfit()
+
     # Pass/fail masks
     msk_data_pass = tf.config['pass'](data)
     msk_data_fail = ~msk_data_pass
     msk_sig_pass  = tf.config['pass'](signal)
     msk_sig_fail  = ~msk_sig_pass
-
-    # Transfer factor calculator instance
-    calc = tf.calculator(data=data, config=tf.config) # Using default configuration
-    calc.mass   = args.mass
-    calc.window = args.window
-    # ... calc.partialbins, calc.emptybins, ...
-    calc.fit() # ...(theta=0.5)
-    w_nom  = calc.weights(data  [msk_data_fail])
-    w_up   = calc.weights(data  [msk_data_fail], shift=+1)
-    w_down = calc.weights(data  [msk_data_fail], shift=-1)
-    w_sig  = calc.weights(signal[msk_sig_fail])
+    
+    print "  -- Computing data weights"
+    w_nom, w_up, w_down  = calc.fullweights(data [msk_data_fail])
+    print "  -- Computing signal weights"
+    w_sig, _, _ = calc.fullweights(signal[msk_sig_fail])
+    print "  -- Final fit done"
     if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/signalinjection_')
-
-
+    
 
     # Performing signal injection test
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
@@ -181,7 +154,6 @@ def main ():
                                              [True,  True,  True,  False],
                                              [True,  True,  False, True]):
             
-       
             if not prefit:
                 mu = bestfit_mu[0]
                 pass
@@ -194,13 +166,14 @@ def main ():
             p0, p1 = c.pads()
 
             # -- Histograms: Main pad
-            bins = np.linspace(50, 300, 50 + 1, endpoint=True)
+            bins = tf.config['massbins']
+
             h_bkg      = c.hist(data['m'][msk_data_fail], bins=bins, weights=data['weight'][msk_data_fail] * w_nom,  display=False)
             h_bkg_up   = c.hist(data['m'][msk_data_fail], bins=bins, weights=data['weight'][msk_data_fail] * w_up,   display=False)
             h_bkg_down = c.hist(data['m'][msk_data_fail], bins=bins, weights=data['weight'][msk_data_fail] * w_down, display=False)
 
-            h_sig  = c.hist(signal['m'][msk_sig_pass], bins=bins, weights=signal['weight'][msk_sig_pass],         scale=mu, display=False)
-            h_sfl  = c.hist(signal['m'][msk_sig_fail], bins=bins, weights=signal['weight'][msk_sig_fail] * w_sig, scale=mu, display=False)
+            h_sig = c.hist(signal['m'][msk_sig_pass], bins=bins, weights=signal['weight'][msk_sig_pass],         scale=mu, display=False)
+            h_sfl = c.hist(signal['m'][msk_sig_fail], bins=bins, weights=signal['weight'][msk_sig_fail] * w_sig, scale=mu, display=False)
             
             if not fit:
                 h_bkg     .Add(h_sfl, -1) # Subtracting signal
@@ -208,13 +181,12 @@ def main ():
                 h_bkg_down.Add(h_sfl, -1) # --
                 pass
 
-            
-            h_bkg  = c.stack(h_bkg,  # @TODO: subtract signal
-                             fillcolor=ROOT.kAzure + 7, 
-                             label='Background pred.')
-            h_sig  = c.stack(h_sig,
-                             fillcolor=ROOT.kRed + 1,
-                             label="Z' (#mu = %s)" % ("%.0f" % mu if prefit else "%.2f #pm %.2f" % (mu, bestfit_mu[1])))
+            h_bkg = c.stack(h_bkg,  # @TODO: subtract signal
+                            fillcolor=ROOT.kAzure + 7, 
+                            label='Background pred.')
+            h_sig = c.stack(h_sig,
+                            fillcolor=ROOT.kRed + 1,
+                            label="Z' (#mu = %s)" % ("%.0f" % mu if prefit else "%.2f #pm %.2f" % (mu, bestfit_mu[1])))
             
             h_sum = h_bkg#c.getStackSum()
             h_sum = c.hist(h_sum, 
@@ -242,7 +214,7 @@ def main ():
                     "Sherpa incl. #gamma MC",
                     "Trimmed anti-k_{t}^{R=1.0} jets",
                     "ISR #gamma selection",
-                    "Fit region: %d GeV #pm %d %%" % (args.mass, args.window * 100.),
+                    "Window: %d GeV #pm %d %%" % (args.mass, 20.),#args.window * 100.),
                     ("Signal" if args.inject else "No signal") + " injected",
                    ], qualifier='Simulation Internal')
 
@@ -263,7 +235,7 @@ def main ():
             if args.show and not fit: c.show()
             if args.save and not fit: c.save('plots/signalinjection_%dGeV_pm%d_%s_%s.pdf' % (
                     args.mass, 
-                    args.window * 100., 
+                    20.,#args.window * 100., 
                     ('prefit_mu%d' % mu if prefit else 'postfit'),
                     ('injected' if args.inject else 'notinjected')
                     ))
@@ -337,8 +309,6 @@ def main ():
             pass
         
         pass
-    
-    # ...
     
     return
 

@@ -12,9 +12,13 @@
 # Basic import(s)
 import sys, glob
 
+# Get ROOT to stop hogging the command-line options
+import ROOT
+ROOT.PyConfig.IgnoreCommandLineOptions = True
+
 # Scientific import(s)
 try:
-    import ROOT
+    # Numpy
     import numpy as np
     from root_numpy import *
 except ImportError:
@@ -23,7 +27,7 @@ except ImportError:
     sys.exit()
     pass
 
-# Local include(s)
+# Local import(s)
 try:
     import transferfactor as tf
     from rootplotting import ap
@@ -41,19 +45,19 @@ import argparse
 
 parser = argparse.ArgumentParser(description='Perform W/Z test search.')
 
-parser.add_argument('--show', dest='show',  action='store_const',
+parser.add_argument('--window', dest='window', type=float,
+                    default=None,
+                    help='Width of excluded mass window (default: None)')
+parser.add_argument('--show', dest='show', action='store_const',
                     const=True, default=False,
                     help='Show plots (default: False)')
-parser.add_argument('--save', dest='save',  action='store_const',
+parser.add_argument('--save', dest='save', action='store_const',
                     const=True, default=False,
                     help='Save plots (default: False)')
 
 
 # Main function definition.
 def main ():
-
-    # Check(s)
-    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
     # Parse command-line arguments
     args = parser.parse_args()
@@ -62,21 +66,23 @@ def main ():
     # Setup.
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
+    signal_DSID = int("1%02d085" % (0 if args.window is None else args.window * 100))
+
     # Load data
     files = {
         'data': glob.glob(tf.config['base_path'] + 'objdef_data_*.root'),
-        'bkg':  glob.glob(tf.config['base_path'] + 'objdef_TF_120085.root'),
+        'bkg':  glob.glob(tf.config['base_path'] + 'objdef_TF_%d.root' % signal_DSID),
         'sig':  glob.glob(tf.config['base_path'] + 'objdef_MC_3054*.root'),
-        'sfl':  glob.glob(tf.config['base_path'] + 'objdef_TF_120085_WZfail.root'),
+        'sfl':  glob.glob(tf.config['base_path'] + 'objdef_TF_%d_signalfail.root' % signal_DSID),
         }
 
     if 0 in map(len, files.values()):
         warning("No files found.")
         return
 
-    data      = {key: loadData(files[key], tf.config['finaltree'],                               prefix=None) for key in files}   # prefix=tf.config['prefix']
-    data_up   = {key: loadData(files[key], tf.config['finaltree'].replace('Nominal', 'TF_UP'),   prefix=None) for key in ['bkg']} # prefix=...
-    data_down = {key: loadData(files[key], tf.config['finaltree'].replace('Nominal', 'TF_DOWN'), prefix=None) for key in ['bkg']} # ...
+    data      = {key: loadData(files[key], tf.config['finaltree'],                               prefix=tf.config['prefix']) for key in files}   
+    data_up   = {key: loadData(files[key], tf.config['finaltree'].replace('Nominal', 'TF_UP'),   prefix=tf.config['prefix']) for key in ['bkg']} 
+    data_down = {key: loadData(files[key], tf.config['finaltree'].replace('Nominal', 'TF_DOWN'), prefix=tf.config['prefix']) for key in ['bkg']} 
     info      = {key: loadData(files[key], tf.config['outputtree'], stop=1)                      for key in files}
     
     # Rename variables
@@ -121,20 +127,18 @@ def main ():
         # Plotting
         # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
         
-        var = 'Jet_m'
-        
         c = ap.canvas(num_pads=2, batch=not args.show)
         p0, p1 = c.pads()
 
         # -- Histograms: Main pad
-        bins = np.linspace(50, 300, 50 + 1, endpoint=True)
+        bins = np.linspace(50, 110, 30 + 1, endpoint=True)#tf.config['massbins']
         
-        h_bkg      = c.hist(data     ['bkg'][var], bins=bins, weights=data     ['bkg']['weight'], display=False)
-        h_bkg_up   = c.hist(data_up  ['bkg'][var], bins=bins, weights=data_up  ['bkg']['weight'], display=False)
-        h_bkg_down = c.hist(data_down['bkg'][var], bins=bins, weights=data_down['bkg']['weight'], display=False)
+        h_bkg      = c.hist(data     ['bkg']['m'], bins=bins, weights=data     ['bkg']['weight'], display=False)
+        h_bkg_up   = c.hist(data_up  ['bkg']['m'], bins=bins, weights=data_up  ['bkg']['weight'], display=False)
+        h_bkg_down = c.hist(data_down['bkg']['m'], bins=bins, weights=data_down['bkg']['weight'], display=False)
 
-        h_sig  = c.hist(data['sig'][var], bins=bins, weights=data['sig']['weight'], scale=mu, display=False)
-        h_sfl  = c.hist(data['sfl'][var], bins=bins, weights=data['sfl']['weight'], scale=mu, display=False)
+        h_sig  = c.hist(data['sig']['m'], bins=bins, weights=data['sig']['weight'], scale=mu, display=False)
+        h_sfl  = c.hist(data['sfl']['m'], bins=bins, weights=data['sfl']['weight'], scale=mu, display=False)
         
         if not fit:
             h_bkg     .Add(h_sfl, -1) # Subtracting signal
@@ -161,7 +165,7 @@ def main ():
         h_bkg_down = c.hist(h_bkg_down,
                             linecolor=ROOT.kGreen + 1, linestyle=2, option='HIST')
     
-        h_data = c.plot(data['data'][var], bins=bins, weights=data['data']['weight'],
+        h_data = c.plot(data['data']['m'], bins=bins, weights=data['data']['weight'],
                         label='Data')
 
         # -- Histograms: Ratio pad
@@ -175,7 +179,7 @@ def main ():
         c.text(["#sqrt{s} = 13 TeV,  L = %s fb^{-1}" % tf.config['lumi'],
                 "Trimmed anti-k_{t}^{R=1.0} jets",
                 "ISR #gamma selection",
-                "Fit region: %d GeV #pm %d %%" % (85, 0.2 * 100.), # @TODO: Improve
+                "Window: %d GeV #pm %d %%" % (85, (0.2 if args.window is None else args.window) * 100.), # @TODO: Improve
                ], qualifier='Internal')
 
         # -- Axis labels
@@ -183,17 +187,22 @@ def main ():
         c.ylabel('Events')
         p1.ylabel('Data / Est.')
 
+        # -- Axis limits
+        #c.ylim(2E+01, 2E+06)
+        #c.ylim(0, 14000)
+        p1.ylim(0.8, 1.2)
+
         # -- Line(s)
         p1.yline(1.0)
-
-        # -- Axis limits
-        c.ylim(2E+01, 2E+06)
-        p1.ylim(0.7, 1.3)
-
-        c.log()            
+        for d in [0.8, 1.2] + ([] if args.window is None else [1 - args.window, 1 + args.window]):
+            p0.xline(d * 85.)
+            p1.xline(d * 85.)
+            pass
+        
+        #c.log()            
         c.legend()
         if args.show and not fit: c.show()
-        if args.save and not fit: c.save('plots/wzsearch_%s.pdf' % ('prefit_mu%d' % mu if prefit else 'postfit'))
+        if args.save and not fit: c.save('plots/wzsearch_%s%s.pdf' % ('' if args.window is None else 'pm%d_' % (args.window * 100), 'prefit_mu%d' % mu if prefit else 'postfit'))
 
         
         # Fit
