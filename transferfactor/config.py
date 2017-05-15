@@ -48,7 +48,9 @@ config = {
     'axes_fine' : [
         np.linspace(1.5,         5.0,          10 * 70 + 1, endpoint=True), # x-axis: rhoDDT
         np.linspace(np.log(200), np.log(1000), 10 * 10 + 1, endpoint=True), # y-axis: log(pT)
-        ]
+        ],
 
-    
+    # Jet mas spectrum bin edges
+    'massbins' : np.linspace(50, 300, 50 + 1, endpoint=True),
+
     }
