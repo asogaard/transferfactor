@@ -13,10 +13,10 @@ import numpy as np
 config = {
 
     # Base path for input files
-    'base_path' : '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/outputObjdef/2017-04-27/',
+    'base_path' : 'data/', # '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/outputObjdef/2017-04-27/',
 
     # Path to cross-sections file
-    'xsec_file' : '/afs/cern.ch/user/a/asogaard/public/Analysis/2016/BoostedJetISR/sampleInfo.csv',
+    'xsec_file' : 'sampleInfo.csv', # '/afs/cern.ch/user/a/asogaard/public/Analysis/2016/BoostedJetISR/sampleInfo.csv',
 
     # Name of tree from which to read input data
     'tree'      : 'BoostedJet+ISRgamma/Nominal/EventSelection/Pass/NumLargeRadiusJets/Postcut',
@@ -54,3 +54,14 @@ config = {
     'massbins' : np.linspace(50, 300, 50 + 1, endpoint=True),
 
     }
+
+# Bin centres
+config['centres'] = [
+    config['axes'][0][:-1] + 0.5 * np.diff(config['axes'][0]),
+    config['axes'][1][:-1] + 0.5 * np.diff(config['axes'][1])
+]
+
+config['centres_fine'] = [
+    config['axes_fine'][0][:-1] + 0.5 * np.diff(config['axes_fine'][0]),
+    config['axes_fine'][1][:-1] + 0.5 * np.diff(config['axes_fine'][1])
+]

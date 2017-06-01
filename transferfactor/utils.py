@@ -74,7 +74,7 @@ def get_ratio_numpy (num, denom):
         mean[j,i] = ratio.GetBinContent(i + 1, j + 1) # Transposing due to different ordering
         err [j,i] = ratio.GetBinError  (i + 1, j + 1)
         pass
-
+        
     return mean, err
 
 
@@ -88,8 +88,8 @@ def get_histogram (data, params, axes, mask=None):
 
     # Initialise ROOT histogram
     hist = TH2F('h2_%d' % np.random.randint(100000), "", 
-        len(axes[0]), axes[0][0], axes[0][-1], 
-        len(axes[1]), axes[1][0], axes[1][-1])
+        len(axes[0]) - 1, axes[0][0], axes[0][-1], 
+        len(axes[1]) - 1, axes[1][0], axes[1][-1])
     hist.Sumw2()
 
     # Prepare arrays for filling 

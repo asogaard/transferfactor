@@ -49,6 +49,9 @@ parser = argparse.ArgumentParser(description='Compute global background shape (G
 parser.add_argument('--mass', dest='mass', type=int,
                     required=True,
                     help='Center of excluded mass window')
+parser.add_argument('--inject', dest='inject', action='store_const',
+                    const=True, default=False,
+                    help='Inject signal (default: False)')
 parser.add_argument('--show', dest='show', action='store_const',
                     const=True, default=False,
                     help='Show plots (default: False)')
@@ -75,7 +78,10 @@ def main ():
     sig_file = 'objdef_MC_{DSID:6d}.root'.format(DSID=sig_DSID)
 
     # Load data
-    files  = glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root') + [tf.config['base_path'] + sig_file]
+    files = glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root')
+    if args.inject:
+        files += [tf.config['base_path'] + sig_file]
+        pass
 
     if len(files) == 0:
         warning("No files found. Try to run:")
@@ -124,7 +130,7 @@ def main ():
     # Nominal fit
     calc.fit()
     w_nom = calc.weights(data[msk_fail])
-    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/globalbackground_')
+    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/globalbackground_%s_' % ('injected' if args.inject else 'notinjected'))
 
     # mass +/- 20% stripe fit
     calc.mass   = args.mass
@@ -141,10 +147,11 @@ def main ():
     ctemp = ap.canvas(batch=True)
     for mass in masses:
         print " --", mass
+
         # Fit TF profile
         calc.mass = mass
         calc.fit()
-        if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/globalbackground_%dGeV_' % args.mass)
+        if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/globalbackground_%dGeV_%s_' % (args.mass, 'injected' if args.inject else 'notinjected'))
 
         # Get TF weights
         w = calc.weights(data[msk_fail])
@@ -163,10 +170,6 @@ def main ():
         backgrounds[idx,:] = dict_backgrounds[mass]
         pass
 
-    #print backgrounds
-    #print backgrounds.mean(axis=0), len(backgrounds.mean(axis=0))
-    #print backgrounds.mean(axis=1), len(backgrounds.mean(axis=1))
-
     
     # Plotting
     # – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – 
@@ -177,7 +180,9 @@ def main ():
 
     # Add stacked backgrounds
     h_bkg_nom    = c.stack(data  ['m'][msk_fail],     bins=bins, weights=data  ['weight'][msk_fail] * w_nom,    fillcolor=ROOT.kAzure  + 7, label="Bkg. (Nom.)")
-    h_sig        = c.stack(signal['m'][msk_sig_pass], bins=bins, weights=signal['weight'][msk_sig_pass],        fillcolor=ROOT.kRed    + 1, label="Z' (%d GeV)" % args.mass)
+    if args.inject:
+        h_sig    = c.stack(signal['m'][msk_sig_pass], bins=bins, weights=signal['weight'][msk_sig_pass],        fillcolor=ROOT.kOrange + 1, label="Z' (%d GeV)" % args.mass)
+        pass
     h_bkg_stripe = c.hist (data  ['m'][msk_fail],     bins=bins, weights=data  ['weight'][msk_fail] * w_stripe, linecolor=ROOT.kGreen  + 1, label="Bkg. (%d GeV #pm 20%%)" % args.mass)
     h_gbs        = c.hist(backgrounds.mean(axis=0),   bins=bins,                                                linecolor=ROOT.kViolet + 1, label="Bkg. (GBS)")
     
@@ -190,7 +195,9 @@ def main ():
     h_data = c.plot (data['m'][msk_pass], bins=bins, weights=data['weight'][msk_pass], markersize=0.8, label='Pseudo-data', scale=1)
 
     # Draw error- and ratio plots
-    hr_sig  = c.ratio_plot((h_sig,       h_bkg_nom), option='HIST', offset=1)
+    if args.inject:
+        hr_sig  = c.ratio_plot((h_sig,       h_bkg_nom), option='HIST', offset=1)
+        pass
     h_err   = c.ratio_plot((h_sum,       h_bkg_nom), option='E2')
     h_ratio = c.ratio_plot((h_data,      h_bkg_nom), markersize=0.8)
     h_rgbs  = c.ratio_plot((h_gbs,       h_bkg_nom), linecolor=ROOT.kViolet + 1, option='HIST ][')
@@ -201,8 +208,10 @@ def main ():
     c.ylabel('Events')
     p1.ylabel('Data / Nom.')
     c.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",
-            "Sherpa MC 15",
+            "Sherpa incl. #gamma MC",
             "Trimmed anti-k_{t}^{R=1.0} jets",
+            "ISR #gamma selection",
+            ("Signal" if args.inject else "No signal") + " injected",
             ], 
            qualifier='Simulation Internal')
 
@@ -219,8 +228,62 @@ def main ():
     c.legend()
 
     # Save and show plot
-    if args.save: c.save('plots/globalbackground_spectrum_%dGeV.pdf' % args.mass)
+    if args.save: c.save('plots/globalbackground_spectrum_%dGeV_%s.pdf' % (args.mass, 'injected' if args.inject else 'notinjected'))
     if args.show: c.show()
+
+
+    # p0-plot
+    # – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – 
+    
+    # Setup canvas
+    c2 = ap.canvas(batch=not args.show)
+
+    p_local  = h_data.Clone('p_local')
+    p_global = h_data.Clone('p_global')
+
+    for bin in range(1, h_data.GetXaxis().GetNbins() + 1):
+        c_data = h_data      .GetBinContent(bin)
+        e_data = h_data      .GetBinError  (bin)
+        c_loc  = h_bkg_stripe.GetBinContent(bin)
+        e_loc  = h_bkg_stripe.GetBinError  (bin)
+        c_glb  = h_gbs       .GetBinContent(bin)
+        e_glb  = e_loc # h_gbs    .GetBinError  (bin)
+
+        z_loc = (c_data - c_loc) / np.sqrt( np.square(e_data) + np.square(e_loc) )
+        z_glb = (c_data - c_glb) / np.sqrt( np.square(e_data) + np.square(e_glb) ) if c_glb > 0 else 0
+
+        p_loc = min(ROOT.TMath.Erfc(z_loc / np.sqrt(2)), 1)
+        p_glb = min(ROOT.TMath.Erfc(z_glb / np.sqrt(2)), 1)
+
+        p_local .SetBinContent(bin, p_loc)
+        p_global.SetBinContent(bin, p_glb)
+        p_local .SetBinError  (bin, 0)
+        p_global.SetBinError  (bin, 0)
+        pass
+
+    c2.plot(p_local,  markercolor=ROOT.kGreen  + 1, linecolor=ROOT.kGreen  + 1, option='PL', label="Local (20% window)")
+    c2.plot(p_global, markercolor=ROOT.kViolet + 1, linecolor=ROOT.kViolet + 1, option='PL', label="Global (GBS)")
+    c2.xlabel("Signal jet mass [GeV]")
+    c2.ylabel("p_{0}")
+    c2.log()
+
+    c2.ylim(1E-04, 1E+04)
+    for sigma in range(4):
+        c2.yline(ROOT.TMath.Erfc(sigma / np.sqrt(2)))
+        pass
+
+    c2.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",
+            "Sherpa incl. #gamma MC",
+            "Trimmed anti-k_{t}^{R=1.0} jets",
+            "ISR #gamma selection",
+            ("Signal" if args.inject else "No signal") + " injected" + (" at m = %d GeV" % args.mass if args.inject else ""),
+            ], 
+           qualifier='Simulation Internal')
+
+    c2.legend()
+    if args.save: c2.save('plots/globalbackground_p0_%dGeV_%s.pdf' % (args.mass, 'injected' if args.inject else 'notinjected'))
+    if args.show: c2.show()
+    
     return
 
 

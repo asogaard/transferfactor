@@ -154,15 +154,21 @@ def main ():
         p1.ylabel('Data / Est.')
 
         c.ylim(1E+01, 1E+07)
-        p1.yline(1.0)
         p1.ylim(0.8, 1.2)
-        p1.xlines([args.mass * (1 - args.window), args.mass * (1 + args.window)])
+        p1.yline(1.0)
+        c.region("SR", 0.8 * args.mass, 1.2 * args.mass)
+
+        
+        #for x in [args.mass * (1 - args.window), args.mass * (1 + args.window)]:
+        #    p0.line(x, 1E+01, x, 2E+04)
+        #    pass
+        #p1.xlines([args.mass * (1 - args.window), args.mass * (1 + args.window)])
 
         c.text(["#sqrt{s} = 13 TeV,  L = %s fb^{-1}" % tf.config['lumi'],
                 "Sherpa incl. #gamma MC",
                 "Trimmed anti-k_{t}^{R=1.0} jets",
                 "ISR #gamma selection",
-                "Fit region: %d GeV #pm %d %%" % (args.mass, args.window * 100.)
+                "Window: %d GeV #pm %d %%" % (args.mass, args.window * 100.)
                ], qualifier='Simulation Internal')
 
         c.log()

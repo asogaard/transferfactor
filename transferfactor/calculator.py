@@ -58,8 +58,8 @@ class calculator (object):
 
         self._clf = None
         self._partialbins = True
-        self._emptybins = True
-        self._fitted = False
+        self._emptybins   = False
+        self._fitted     = False
         self._fullfitted = False
         self._shift = None
         return
@@ -236,9 +236,9 @@ class calculator (object):
 
         # Mesh
         if self._verbose: print "  Setting up grid for fitting"
-        X1, X2 = np.meshgrid(*self._config['axes'])
+        X1, X2 = np.meshgrid(*self._config['centres']) # *self._config['axes']
         X = np.vstack((X1.ravel(), X2.ravel())).T
-
+        
         # Mean- and error arrays
         if self._verbose: print "  Setting up mean- and error arrays"
         y = self._TF_CR_mean.ravel()
@@ -298,6 +298,7 @@ class calculator (object):
         self.window = 0.2
         self.fit()
         theta = self.theta()
+        params = self._clf.get_params(deep=True)
         print "  -- Optimal theta for 20% fit:", theta
 
         # -- 30% validation fit
@@ -344,6 +345,7 @@ class calculator (object):
         print "Second 20% fit"
         self.window = 0.2
         self.fit(theta=theta)
+        #self._clf.set_params(**params)
         
         # ...
         self._fullfitted = True
@@ -357,7 +359,7 @@ class calculator (object):
         assert self._fitted, "Must have called 'fit' before 'weights'."
 
         # Mesh (fine)
-        X1, X2 = np.meshgrid(*self._config['axes_fine'])
+        X1, X2 = np.meshgrid(*self._config['axes_fine']) # *self._config['axes_fine'])
         mesh = np.vstack((X1.ravel(), X2.ravel())).T
 
         # Format input data
@@ -378,8 +380,8 @@ class calculator (object):
             # Get indices to nearest point in fine mesh
             N = X.shape[0]
 
-            xaxis = self._config['axes_fine'][0]
-            yaxis = self._config['axes_fine'][1]
+            xaxis = self._config['axes_fine'][0] # axes_fine
+            yaxis = self._config['axes_fine'][1] # axes_fine
             idx1 = np.round(np.clip((X[:,0] - xaxis[0])/(xaxis[-1] - xaxis[0]),0,1) * (xaxis.size - 1)).astype(int)
             idx2 = np.round(np.clip((X[:,1] - yaxis[0])/(yaxis[-1] - yaxis[0]),0,1) * (yaxis.size - 1)).astype(int)
 
@@ -430,12 +432,14 @@ class calculator (object):
         # (1) TF profile and residuals
         # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
-        X1, X2 = np.meshgrid(*self._config['axes'])
+        X1, X2 = np.meshgrid(*self._config['centres']) # (*self._config['axes'])
 
         # Get TF weights on mesh
         X = np.column_stack((X1.ravel(), X2.ravel()))
         TF_pred = asyncPredict(self._clf, X, quiet=True, num_processes=1).reshape(self._TF_CR_mean.shape)
         
+        X1, X2 = np.meshgrid(*self._config['axes']) # (*self._config['axes'])
+
         # Compute pulls
         TF_CR_pulls = np.zeros_like(self._TF_CR_mean)
         msk = (self._TF_CR_err > 0)
@@ -520,13 +524,13 @@ class calculator (object):
         c2.xlabel("Transfer factor fit residual pull")
         c2.ylabel("Number of bins (a.u.)")
 
-        c2.text(["#sqrt{s} = 13 TeV,  L = %.1f fb^{-1}" % (36.1),
-                 "Trimmed anti-k_{t}^{R=1.0} jets",
+        c2.text(["#sqrt{s} = 13 TeV,  L = %.1f fb^{-1}" % (36.1)] + 
+                 (["Sherpa incl. #gamma MC"] if MC else []) +
+                 ["Trimmed anti-k_{t}^{R=1.0} jets",
                  "ISR #gamma selection"] +
-                 (["Sherpa inclusive #gamma MC"] if MC else []) +
                  ["No mass window" if not self._mass else \
-                     ("Window: m #in %2d GeV #pm %d%%" % (self._mass, self._window * 100.) if self._window == 0.3 else
-                      "Window: m #in %2d GeV #pm %d%%" % (self._mass, self._window * 100.)),
+                     ("Window: %2d GeV #pm %d%%" % (self._mass, self._window * 100.) if self._window == 0.3 else
+                      "Window: %2d GeV #pm %d%%" % (self._mass, self._window * 100.)),
                  ], qualifier='Simulation Internal')
 
         # Legend
@@ -535,12 +539,12 @@ class calculator (object):
         step = 0.05
         legend = ROOT.TLegend(xmin, ymax - (4 if not self._mass else 7) * step, 0.5, ymax)
         legend.AddEntry(h_CR_pulls, "Fit region:",         'L')
-        legend.AddEntry(None,       "  Mean: #scale[0.5]{ }%.2f" % f_CR_pulls.GetParameter(1), '')
-        legend.AddEntry(None,       "  Width: %.2f" %              f_CR_pulls.GetParameter(2), '')
+        legend.AddEntry(None,       "  Mean: #scale[0.5]{ }%.2f #pm %.2f" % (f_CR_pulls.GetParameter(1), f_CR_pulls.GetParError(1)), '')
+        legend.AddEntry(None,       "  Width: %.2f #pm %.2f" %              (f_CR_pulls.GetParameter(2), f_CR_pulls.GetParError(2)), '')
         if self._mass:
             legend.AddEntry(h_SR_pulls, "Interp. region:", 'L')
-            legend.AddEntry(None,       "  Mean: #scale[0.5]{ }%.2f" % f_SR_pulls.GetParameter(1), '')
-            legend.AddEntry(None,       "  Width: %.2f" %              f_SR_pulls.GetParameter(2), '')
+            legend.AddEntry(None,       "  Mean: #scale[0.5]{ }%.2f #pm %.2f" % (f_SR_pulls.GetParameter(1), f_SR_pulls.GetParError(1)), '')
+            legend.AddEntry(None,       "  Width: %.2f #pm %.2f" %              (f_SR_pulls.GetParameter(2), f_SR_pulls.GetParError(2)), '')
             pass
         legend.AddEntry(f_CR_pulls, "Central fit", 'L')
         legend.Draw()

@@ -86,9 +86,10 @@ def main ():
     sig_DSID = get_signal_DSID(args.mass)
 
     # Load data
-    files_data = glob.glob(tf.config['base_path'] + 'objdef_data_*.root')
+    files_data = glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root') #glob.glob(tf.config['base_path'] + 'objdef_data_*.root')
     files_WZ   = glob.glob(tf.config['base_path'] + 'objdef_MC_30543*.root') + \
                  glob.glob(tf.config['base_path'] + 'objdef_MC_30544*.root')    
+    
     if sig_DSID is None:
         print "Assuming signal is W/Z"
         files_sig = files_WZ    
@@ -118,6 +119,20 @@ def main ():
     # ----------------------------------------------------
     # Append new DSID field # @TODO: Make more elegant?
     #for arr, info in zip([signal, WZ], [info_sig, info_WZ]):
+
+    # @TEMP >>>
+    if data is not None:
+        data = append_fields(data, 'DSID', np.zeros((data.size,)), dtypes=int)
+        for idx in info_data['id']:    
+            msk = (data['id'] == idx) # Get mask of all 'data' entries with same id, i.e. from same file
+            tmp_DSID = info_data['DSID'][idx]  # Get DSID for this file
+            data['weight'][msk] *= xsec[tmp_DSID] # Scale by cross section x filter eff. for this DSID
+            data['DSID']  [msk] = tmp_DSID        # Store DSID
+            pass
+        #data['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
+        pass
+    # @TEMP <<<
+
     if signal is not None:
         signal = append_fields(signal, 'DSID', np.zeros((signal.size,)), dtypes=int)
         for idx in info_sig['id']:    
@@ -126,12 +141,11 @@ def main ():
             signal['weight'][msk] *= xsec[tmp_DSID] # Scale by cross section x filter eff. for this DSID
             signal['DSID']  [msk] = tmp_DSID        # Store DSID
             pass
-        # @TODO: k-factors?
-        signal['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
+        #signal['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
         pass
 
     if WZ is not None:
-        signal = append_fields(WZ, 'DSID', np.zeros((WZ.size,)), dtypes=int)
+        WZ = append_fields(WZ, 'DSID', np.zeros((WZ.size,)), dtypes=int)
         for idx in info_WZ['id']:    
             msk = (WZ['id'] == idx) # Get mask of all 'data' entries with same id, i.e. from same file
             tmp_DSID = info_WZ['DSID'][idx]  # Get DSID for this file
@@ -139,7 +153,7 @@ def main ():
             WZ['DSID']  [msk] = tmp_DSID        # Store DSID
             pass
         # @TODO: k-factors?
-        WZ['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
+        #WZ['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
         pass
 
     # Check output.
@@ -172,11 +186,6 @@ def main ():
     calc = tf.calculator(data=data, config=tf.config, subtract=WZ if args.subtractWZMC else None) # Using default configuration
     calc.mass = args.mass
 
-    # 30% window plot
-    calc.window = 0.3
-    calc.fit()
-    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/tf_', MC=False)
-
     # Perform full fit
     if args.window is None:
         calc.fullfit()
@@ -193,6 +202,7 @@ def main ():
             pass
         print "  -- Final fit done"
         if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/tf_', MC=False)
+
 
     # Perform fit with manually-set window size
     else:    
@@ -268,12 +278,14 @@ def main ():
         print "  Writing arrays to file: %s" % var_name
         treename1 = tf.config['tree'].replace('NumLargeRadiusJets', 'Jet_tau21DDT').replace('Nominal', var_name)
         make_directories('/'.join(treename1.split('/')[:-1]), fromDir=output)
-        tree1 = array2tree(array1, name=treename1.split('/')[-1])
+        tree1 = ROOT.TTree(treename1.split('/')[-1], "")
+        array2tree(array1, tree=tree1)
         
         # outputTree
         treename2 = tf.config['outputtree'].replace('Nominal', var_name)
         make_directories('/'.join(treename2.split('/')[:-1]), fromDir=output)
-        tree2 = array2tree(array2, name=treename2.split('/')[-1])
+        tree2 = ROOT.TTree(treename2.split('/')[-1], "")
+        array2tree(array2, tree=tree2)
 
         output.Write()        
         pass
@@ -281,7 +293,7 @@ def main ():
     output.Close()
         
 
-    # Write TF-scaled failing W/Z MC to file
+    # Write TF-scaled failing signal MC to file
     output = ROOT.TFile('output/objdef_TF_{DSID:6d}_signalfail.root'.format(DSID=DSID), 'RECREATE')
     
     for shift, w_sig in zip([0, 1, -1], [w_sig_nom, w_sig_up, w_sig_down]):
@@ -294,7 +306,7 @@ def main ():
         vector_w = signal['weight'][msk_sig_fail] * w_sig
         
         # -- Prepare DISD and isMC vectors
-        vector_DSID = np.ones_like(vector_w) * DSID
+        vector_DSID = np.ones_like(vector_w) * (DSID + 1E+05)
         vector_isMC = np.ones_like(vector_w).astype(bool)
         
         array1 = np.array(zip(vector_m, vector_w),
@@ -309,12 +321,14 @@ def main ():
         print "  Writing arrays to file: %s" % var_name
         treename1 = tf.config['tree'].replace('NumLargeRadiusJets', 'Jet_tau21DDT').replace('Nominal', var_name)
         make_directories('/'.join(treename1.split('/')[:-1]), fromDir=output)
-        tree1 = array2tree(array1, name=treename1.split('/')[-1])
+        tree1 = ROOT.TTree(treename1.split('/')[-1], "")
+        array2tree(array1, tree=tree1)
         
         # outputTree
         treename2 = tf.config['outputtree'].replace('Nominal', var_name)
         make_directories('/'.join(treename2.split('/')[:-1]), fromDir=output)
-        tree2 = array2tree(array2, name=treename2.split('/')[-1])
+        tree2 = ROOT.TTree(treename2.split('/')[-1], "")
+        array2tree(array2, tree=tree2)
 
         output.Write()        
         pass

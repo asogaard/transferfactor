@@ -30,7 +30,7 @@ except ImportError:
 # Local import(s)
 try:
     import transferfactor as tf
-    from transferfactor.utils import get_signal_DSID
+    from transferfactor.utils import get_signal_DSID, get_histogram
     from rootplotting import ap
     from rootplotting.tools import *
 except ImportError:
@@ -49,9 +49,6 @@ parser = argparse.ArgumentParser(description='Perform signal injection test.')
 parser.add_argument('--mass', dest='mass', type=int,
                     required=True,
                     help='Center of excluded mass window')
-#parser.add_argument('--window', dest='window', type=float,
-#                    default=0.2,
-#                    help='Relative width of excluded mass window (default: 0.2)')
 parser.add_argument('--show', dest='show', action='store_const',
                     const=True, default=False,
                     help='Show plots (default: False)')
@@ -61,6 +58,9 @@ parser.add_argument('--save', dest='save', action='store_const',
 parser.add_argument('--inject', dest='inject', action='store_const',
                     const=True, default=False,
                     help='Inject signal (default: False)')
+parser.add_argument('--toys', dest='toys', action='store_const',
+                    const=True, default=False,
+                    help='Use toys (default: False)')
 
 
 # Main function.
@@ -114,10 +114,94 @@ def main ():
     msk_sig  = (data['DSID'] == sig_DSID)
     msk_data = ~msk_sig
 
-    signal = data[ msk_sig]
+    print "DATA STATISTICS:", np.sum(data[msk_data]['weight'])
+
+    signal = data[msk_sig]
     if not args.inject:
         # If we're not injecting signal, explicitly remove it from the 'data' array
         data = data[~msk_sig]
+        pass
+
+
+    # Toys
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+    if args.toys:
+
+        # Get masks
+        msk_pass = tf.config['pass'](data)
+        msk_fail = ~msk_pass
+        
+        # Create histograms
+        if args.inject:
+            pdf_pass = get_histogram(data, tf.config['params'], tf.config['axes'], mask=msk_pass & ~msk_sig)
+            pdf_fail = get_histogram(data, tf.config['params'], tf.config['axes'], mask=msk_fail & ~msk_sig)
+        else:
+            pdf_pass = get_histogram(data, tf.config['params'], tf.config['axes'], mask=msk_pass)
+            pdf_fail = get_histogram(data, tf.config['params'], tf.config['axes'], mask=msk_fail)
+            pass
+
+        # Smooth (only leading background)
+        for _ in range(2):
+            pdf_pass.Smooth()
+            pdf_fail.Smooth()
+            pass
+
+        # Inject afterwards
+        if args.inject:
+            pdf_pass.Add(get_histogram(data, tf.config['params'], tf.config['axes'], mask=msk_pass & msk_sig))
+            pdf_fail.Add(get_histogram(data, tf.config['params'], tf.config['axes'], mask=msk_fail & msk_sig))
+        
+
+        # Create p.d.f.s
+        # -- Define variables
+        rhoDDT = ROOT.RooRealVar('rhoDDT', 'rhoDDT', tf.config['axes'][0][0], tf.config['axes'][0][-1])
+        logpt  = ROOT.RooRealVar('logpt',  'logpt',  tf.config['axes'][1][0], tf.config['axes'][1][-1])
+
+        rhoDDT.setBins(len(tf.config['axes'][0]) - 1)
+        logpt .setBins(len(tf.config['axes'][1]) - 1)
+                    
+        # -- Define histograms
+        rdh_pass = ROOT.RooDataHist('rdh_pass', 'rdh_pass', ROOT.RooArgList(rhoDDT, logpt), pdf_pass)
+        rdh_fail = ROOT.RooDataHist('rdh_fail', 'rdh_fail', ROOT.RooArgList(rhoDDT, logpt), pdf_fail)
+        
+        # -- Turn histograms into pdf's
+        rhp_pass = ROOT.RooHistPdf('rhp_pass', 'rhp_pass', ROOT.RooArgSet(rhoDDT, logpt), rdh_pass)
+        rhp_fail = ROOT.RooHistPdf('rhp_fail', 'rhp_fail', ROOT.RooArgSet(rhoDDT, logpt), rdh_fail)
+
+        # Generate toys
+        mult = 1.
+        N_pass = int(np.sum(data['weight'][msk_pass]) * mult)
+        N_fail = int(np.sum(data['weight'][msk_fail]) * mult)
+
+        dtype = ['rhoDDT','logpt', 'tau21DDT', 'pt', 'm', 'weight']
+        dtype = [(var, 'f8') for var in dtype]
+        toys_pass = np.zeros(N_pass, dtype=dtype)
+        toys_fail = np.zeros(N_fail, dtype=dtype)
+
+        print "Generating toys (pass: %d, fail: %d)" % (N_pass, N_fail)
+        rds_pass = rhp_pass.generate(ROOT.RooArgSet(rhoDDT, logpt), N_pass, True, False)
+        rds_fail = rhp_fail.generate(ROOT.RooArgSet(rhoDDT, logpt), N_fail, True, False)
+
+        for idx in range(N_pass):
+            toys_pass['rhoDDT']  [idx] = rds_pass.get(idx).getRealValue('rhoDDT')
+            toys_pass['logpt']   [idx] = rds_pass.get(idx).getRealValue('logpt')
+            toys_pass['pt']      [idx] = np.exp(toys_pass['logpt'][idx])
+            toys_pass['m']       [idx] = np.sqrt(np.exp(toys_pass['rhoDDT'][idx]) * toys_pass['pt'][idx] * 1.)
+            toys_pass['weight']  [idx] = 1. / float(mult)
+            toys_pass['tau21DDT'][idx] = 0.
+            pass
+
+        for idx in range(N_fail):
+            toys_fail['rhoDDT']  [idx] = rds_fail.get(idx).getRealValue('rhoDDT')
+            toys_fail['logpt']   [idx] = rds_fail.get(idx).getRealValue('logpt')
+            toys_fail['pt']      [idx] = np.exp(toys_fail['logpt'][idx])
+            toys_fail['m']       [idx] = np.sqrt(np.exp(toys_fail['rhoDDT'][idx]) * toys_fail['pt'][idx] * 1.)
+            toys_fail['weight']  [idx] = 1. / float(mult)
+            toys_fail['tau21DDT'][idx] = 1.
+            pass
+
+        data = np.concatenate((toys_pass, toys_fail)) # ???
         pass
 
 
@@ -135,11 +219,11 @@ def main ():
     msk_sig_fail  = ~msk_sig_pass
     
     print "  -- Computing data weights"
-    w_nom, w_up, w_down  = calc.fullweights(data [msk_data_fail])
+    w_nom, w_up, w_down = calc.fullweights(data[msk_data_fail])
     print "  -- Computing signal weights"
     w_sig, _, _ = calc.fullweights(signal[msk_sig_fail])
     print "  -- Final fit done"
-    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/signalinjection_')
+    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/signalinjection_%s%s_' % ("toys_" if args.toys else "", "injected" if args.inject else "notinjected"))
     
 
     # Performing signal injection test
@@ -171,7 +255,7 @@ def main ():
             h_bkg      = c.hist(data['m'][msk_data_fail], bins=bins, weights=data['weight'][msk_data_fail] * w_nom,  display=False)
             h_bkg_up   = c.hist(data['m'][msk_data_fail], bins=bins, weights=data['weight'][msk_data_fail] * w_up,   display=False)
             h_bkg_down = c.hist(data['m'][msk_data_fail], bins=bins, weights=data['weight'][msk_data_fail] * w_down, display=False)
-
+            
             h_sig = c.hist(signal['m'][msk_sig_pass], bins=bins, weights=signal['weight'][msk_sig_pass],         scale=mu, display=False)
             h_sfl = c.hist(signal['m'][msk_sig_fail], bins=bins, weights=signal['weight'][msk_sig_fail] * w_sig, scale=mu, display=False)
             
@@ -181,14 +265,14 @@ def main ():
                 h_bkg_down.Add(h_sfl, -1) # --
                 pass
 
-            h_bkg = c.stack(h_bkg,  # @TODO: subtract signal
+            h_bkg = c.stack(h_bkg,
                             fillcolor=ROOT.kAzure + 7, 
                             label='Background pred.')
             h_sig = c.stack(h_sig,
-                            fillcolor=ROOT.kRed + 1,
+                            fillcolor=ROOT.kOrange + 7,
                             label="Z' (#mu = %s)" % ("%.0f" % mu if prefit else "%.2f #pm %.2f" % (mu, bestfit_mu[1])))
             
-            h_sum = h_bkg#c.getStackSum()
+            h_sum = h_bkg
             h_sum = c.hist(h_sum, 
                            fillstyle=3245, fillcolor=ROOT.kGray + 3, option='E2',
                            label='Stat. uncert.')
@@ -199,11 +283,12 @@ def main ():
             h_bkg_down = c.hist(h_bkg_down,
                                 linecolor=ROOT.kGreen + 1, linestyle=2, option='HIST')
         
-            h_data = c.plot(data['m'][msk_data_pass], bins=bins, weights=data  ['weight'][msk_data_pass],
+            h_data = c.plot(data['m'][msk_data_pass], bins=bins, weights=data['weight'][msk_data_pass], display=False)
+            h_data = c.plot(h_data,
                             label='Pseudo-data')
 
             # -- Histograms: Ratio pad
-            c.ratio_plot((h_sig,      h_sum), option='HIST', offset=1, fillcolor=ROOT.kRed + 1)
+            c.ratio_plot((h_sig,      h_sum), option='HIST', offset=1, fillcolor=ROOT.kOrange + 7)
             c.ratio_plot((h_sum,      h_sum), option='E2')
             c.ratio_plot((h_bkg_up,   h_sum), option='HIST')
             c.ratio_plot((h_bkg_down, h_sum), option='HIST')
@@ -214,28 +299,34 @@ def main ():
                     "Sherpa incl. #gamma MC",
                     "Trimmed anti-k_{t}^{R=1.0} jets",
                     "ISR #gamma selection",
-                    "Window: %d GeV #pm %d %%" % (args.mass, 20.),#args.window * 100.),
+                    "Window: %d GeV #pm %d %%" % (args.mass, 20.),
                     ("Signal" if args.inject else "No signal") + " injected",
-                   ], qualifier='Simulation Internal')
+                   ] + (["Using toys"] if args.toys else []), qualifier='Simulation Internal')
 
             # -- Axis labels
             c.xlabel('Signal jet mass [GeV]')
             c.ylabel('Events')
             p1.ylabel('Data / Est.')
 
+            # -- Log
+            c.log()            
+
+            # -- Axis limits
+            p0.padding(0.55)
+            p1.ylim(0.7, 1.3)
+
             # -- Line(s)
             p1.yline(1.0)
 
-            # -- Axis limits
-            c.ylim(7E+01, 7E+06)
-            p1.ylim(0.7, 1.3)
-
-            c.log()            
+            # -- Region(s)        
+            c.region("SR", 0.8 * args.mass, 1.2 * args.mass)
+            
             c.legend()
             if args.show and not fit: c.show()
-            if args.save and not fit: c.save('plots/signalinjection_%dGeV_pm%d_%s_%s.pdf' % (
+            if args.save and not fit: c.save('plots/signalinjection_%s%dGeV_pm%d_%s_%s.pdf' % (
+                    "toys_" if args.toys else "",
                     args.mass, 
-                    20.,#args.window * 100., 
+                    20.,
                     ('prefit_mu%d' % mu if prefit else 'postfit'),
                     ('injected' if args.inject else 'notinjected')
                     ))
@@ -297,7 +388,7 @@ def main ():
                     rdh_data = ROOT.RooDataHist('rdh_data', 'rdh_data', ROOT.RooArgList(mJ), h_data)
                     
                     # -- Fit pdf to data histogram
-                    pdf.chi2FitTo(rdh_data, ROOT.RooLinkedList())
+                    pdf.chi2FitTo(rdh_data, ROOT.RooLinkedList(), ROOT.Strategy(0))
                     
                     print "Best fit mu: %.3f +/- %.3f" % (mu.getValV(), mu.getError())
                     bestfit_mu.append( (mu.getValV(), mu.getError()) )
