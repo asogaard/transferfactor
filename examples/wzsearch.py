@@ -218,6 +218,22 @@ def main ():
         if args.save and not fit: c.save('plots/wzsearch_%s%s.pdf' % ('' if args.window is None else 'pm%d_' % (args.window * 100), 'prefit_mu%d' % mu if prefit else 'postfit'))
 
         
+        # Saving output for harmonised paper plots
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        if not prefit:
+            outfile = ROOT.TFile('output/hists_isrgamma_WZ.root', 'RECREATE')
+            h_bkg.SetName('h_mJ_QCD')
+            h_bkg_up.SetName('h_mJ_QCD_up')
+            h_bkg_down.SetName('h_mJ_QCD_down')
+            h_data.SetName('h_mJ_data')
+            h_W.SetName('h_mJ_WHad')
+            h_Z.SetName('h_mJ_ZHad')
+            for hist in [h_bkg, h_bkg_up, h_bkg_down, h_data, h_W, h_Z]:
+                hist.Write()
+                pass
+            outfile.Close()
+            pass
+
         # Fitting
         # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
