@@ -202,17 +202,15 @@ class calculator (object):
             pass
 
         # Subtract MC component from data (opt.)
-        #'''
         if self._subtract is not None:
-            if self._verbose: print "  Subtracting component from pass-a nd fail histograms"
-            print "  Subtracting component from pass and fail histograms"
+            if self._verbose: print "  Subtracting component from pass- and fail histograms"
+            if self._verbose: print "   -- (CR) Pass/fail component %.1f/%.1f from %.1f/%.1f" % (h_sub_CR_pass.Integral(), h_sub_CR_fail.Integral(), h_data_CR_pass.Integral(), h_data_CR_fail.Integral())
             h_data_CR_pass.Add(h_sub_CR_pass, -1)
             h_data_CR_fail.Add(h_sub_CR_fail, -1)
-
+            if self._verbose: print "   -- (SR) Pass/fail component %.1f/%.1f from %.1f/%.1f" % (h_sub_SR_pass.Integral(), h_sub_SR_fail.Integral(), h_data_SR_pass.Integral(), h_data_SR_fail.Integral())
             h_data_SR_pass.Add(h_sub_SR_pass, -1)
             h_data_SR_fail.Add(h_sub_SR_fail, -1)
             pass
-        #'''
 
         # Compute ratio
         if self._verbose: print "  Getting TF ratio in SR and CR"
