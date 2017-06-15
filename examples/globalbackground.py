@@ -52,6 +52,9 @@ parser.add_argument('--mass', dest='mass', type=int,
 parser.add_argument('--inject', dest='inject', action='store_const',
                     const=True, default=False,
                     help='Inject signal (default: False)')
+parser.add_argument('--data', dest='data', action='store_const',
+                    const=True, default=False,
+                    help='Use data (default: False/MC)')
 parser.add_argument('--show', dest='show', action='store_const',
                     const=True, default=False,
                     help='Show plots (default: False)')
@@ -66,9 +69,11 @@ def main ():
     # Parse command-line arguments
     args = parser.parse_args()
 
+    DSID = int("100%03d" % args.mass)
+
 
     # Setup.
-    # – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – 
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
     # Get signal file
     sig_DSID = get_signal_DSID(args.mass, tolerance=10)
@@ -78,7 +83,11 @@ def main ():
     sig_file = 'objdef_MC_{DSID:6d}.root'.format(DSID=sig_DSID)
 
     # Load data
-    files = glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root')
+    if args.data:
+        files = glob.glob(tf.config['base_path'] + 'objdef_data_*.root')
+    else:
+        files = glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root')
+        pass
     if args.inject:
         files += [tf.config['base_path'] + sig_file]
         pass
@@ -93,18 +102,18 @@ def main ():
 
     # Scaling by cross section
     xsec = loadXsec(tf.config['xsec_file'])
-    lumi = 36.1
 
     # Append new DSID field
     data = append_fields(data, 'DSID', np.zeros((data.size,)), dtypes=int)
-    for idx in info['id']:    
-        msk = (data['id'] == idx) # Get mask of all 'data' entries with same id, i.e. from same file
+    for idx, id in enumerate(info['id']):
+        msk = (data['id'] == id) # Get mask of all 'data' entries with same id, i.e. from same file
         DSID = info['DSID'][idx]  # Get DSID for this file
-        data['weight'][msk] *= xsec[DSID] # Scale by cross section x filter eff. for this DSID
-        data['DSID']  [msk] = DSID # Store DSID
+        if info['isMC'][idx]:
+            data['weight'][msk] *= xsec[DSID] # Scale by cross section x filter eff. for this DSID
+            data['DSID']  [msk] = DSID # Store DSID
+            data['weight'][msk] *= tf.config['lumi']
+            pass
         pass
-    data['weight'] *= lumi # Scale all events (MC) by luminosity
-    # k-factors?
     data = append_fields(data, 'logpt', np.log(data['pt']))
     
     msk_sig  = (data['DSID'] == sig_DSID)
@@ -123,6 +132,7 @@ def main ():
 
     # -- Signal
     msk_sig_pass = tf.config['pass'](signal)
+    msk_sig_fail = ~msk_sig_pass
 
     # Transfer factor calculator instance
     calc = tf.calculator(data=data, config=tf.config)
@@ -130,19 +140,60 @@ def main ():
     # Nominal fit
     calc.fit()
     w_nom = calc.weights(data[msk_fail])
-    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/globalbackground_%s_' % ('injected' if args.inject else 'notinjected'))
+    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/globalbackground_%s_%s_' % ('injected' if args.inject else 'notinjected', 'data' if args.data else 'MC'))
 
     # mass +/- 20% stripe fit
     calc.mass   = args.mass
     calc.window = 0.2
     calc.fit()
-    w_stripe = calc.weights(data[msk_fail])
+    w_stripe     = calc.weights(data[msk_fail])
+    w_stripe_sig = calc.weights(data[msk_sig_fail])
     
-    
-    # Get GBS
-    bins = tf.config['massbins']
 
-    masses = [100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220]
+    # Global background shape (GBS)
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+    masses = np.linspace(100, 250, 30 + 1, endpoint=True) # GBS mass bins
+    N = data.size
+
+    weights_bkg_nom  = np.zeros((N,), dtype=float)
+    weights_bkg_up   = np.zeros((N,), dtype=float)
+    weights_bkg_down = np.zeros((N,), dtype=float)
+    counter_bkg      = np.zeros((N,), dtype=float)
+
+    ctemp = ap.canvas(batch=True)
+    for mass in masses:
+        print " --", mass
+
+        # Fit TF profile
+        calc.mass = mass
+        calc.fullfit()
+
+        if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/tf_gbs_', MC=False)
+
+        # Get TF weights
+        w_nom, w_up, w_down = calc.fullweights(data[msk_fail])
+
+        # Compute mask for which jets to use in GBS computation
+        msk_fail_window=~(np.abs(data[msk_fail]['m'] - mass) < 0.2 * mass)
+        msk_window     =~(np.abs(data['m']           - mass) < 0.2 * mass)
+
+        # Store weights and increment counter for masked jets
+        weights_bkg_nom [msk_window & msk_fail] += w_nom [msk_fail_window]
+        weights_bkg_up  [msk_window & msk_fail] += w_up  [msk_fail_window]
+        weights_bkg_down[msk_window & msk_fail] += w_down[msk_fail_window]
+        counter_bkg     [msk_window & msk_fail] += 1.
+        print np.sum(counter_bkg)
+        pass
+
+    return
+
+    """
+    # Get GBS
+    #bins = tf.config['massbins']
+    bins = np.linspace(100, 250, 30 + 1, endpoint=True)
+
+    masses = np.linspace(100, 250, 30 + 1, endpoint=True) # bins
     dict_backgrounds = dict()
     ctemp = ap.canvas(batch=True)
     for mass in masses:
@@ -151,7 +202,7 @@ def main ():
         # Fit TF profile
         calc.mass = mass
         calc.fit()
-        if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/globalbackground_%dGeV_%s_' % (args.mass, 'injected' if args.inject else 'notinjected'))
+        if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/globalbackground_%dGeV_%s_%s_' % (args.mass, 'injected' if args.inject else 'notinjected', 'data' if args.data else 'MC'))
 
         # Get TF weights
         w = calc.weights(data[msk_fail])
@@ -169,37 +220,59 @@ def main ():
     for idx, mass in enumerate(masses):
         backgrounds[idx,:] = dict_backgrounds[mass]
         pass
+        """
 
     
     # Plotting
-    # – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – 
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
     
     # Setup canvas
     c = ap.canvas(num_pads=2, batch=not args.show)
     p0, p1 = c.pads()
 
     # Add stacked backgrounds
-    h_bkg_nom    = c.stack(data  ['m'][msk_fail],     bins=bins, weights=data  ['weight'][msk_fail] * w_nom,    fillcolor=ROOT.kAzure  + 7, label="Bkg. (Nom.)")
+    h_bkg_nom    = c.hist(data  ['m'][msk_fail],     bins=bins, weights=data  ['weight'][msk_fail] * w_nom, display=False);
     if args.inject:
-        h_sig    = c.stack(signal['m'][msk_sig_pass], bins=bins, weights=signal['weight'][msk_sig_pass],        fillcolor=ROOT.kOrange + 1, label="Z' (%d GeV)" % args.mass)
+        h_sig    = c.hist(signal['m'][msk_sig_pass], bins=bins, weights=signal['weight'][msk_sig_pass], display=False)
+        h_sfl    = c.hist(signal['m'][msk_sig_fail], bins=bins, weights=signal['weight'][msk_sig_fail] * w_stripe_sig, display=False)
         pass
-    h_bkg_stripe = c.hist (data  ['m'][msk_fail],     bins=bins, weights=data  ['weight'][msk_fail] * w_stripe, linecolor=ROOT.kGreen  + 1, label="Bkg. (%d GeV #pm 20%%)" % args.mass)
-    h_gbs        = c.hist(backgrounds.mean(axis=0),   bins=bins,                                                linecolor=ROOT.kViolet + 1, label="Bkg. (GBS)")
+    h_bkg_stripe = c.hist (data  ['m'][msk_fail],     bins=bins, weights=data  ['weight'][msk_fail] * w_stripe, display=False)
+    h_gbs        = c.hist(backgrounds.mean(axis=0),   bins=bins, display=False)
+
+    # -- Subtract (opt.)
+    if args.inject:
+        h_bkg_stripe.Add(h_sfl, -1)
+        h_gbs       .Add(h_sfl, -1)
+        pass
+
+    # -- Actually draw
+    h_bkg_nom    = c.stack(h_bkg_nom,    fillcolor=ROOT.kAzure  + 7, label="Bkg. (full)")
+    if args.inject:
+        h_sig    = c.stack(h_sig,        fillcolor=ROOT.kRed - 4,    label="Z' (%d GeV)" % args.mass)
+        pass
+    h_bkg_stripe = c.hist (h_bkg_stripe, linecolor=ROOT.kGreen  + 1, label="Bkg. (window)")# % args.mass)
+    h_gbs        = c.hist(h_gbs,         linecolor=ROOT.kViolet + 1, label="Bkg. (GBS)")
     
+
+
     # Draw stats. error of stacked sum
     h_sum = h_bkg_nom.Clone('h_sum') #c.getStackSum()
     h_sum = c.hist(h_sum, fillstyle=3245, fillcolor=ROOT.kGray+2, linecolor=ROOT.kGray + 3, label='Stats. uncert.', option='E2')
     
     # Add (pseudo-) data
-    np.random.seed(21)
-    h_data = c.plot (data['m'][msk_pass], bins=bins, weights=data['weight'][msk_pass], markersize=0.8, label='Pseudo-data', scale=1)
+    h_data = c.plot (data['m'][msk_pass], bins=bins, weights=data['weight'][msk_pass], markersize=0.8, label='Data' if args.data else 'Pseudo-data', scale=1)
+
+    # Axis limits
+    p1.ylim(0.8, 1.2)
+    c.padding(0.45)
+    c.log(True)
 
     # Draw error- and ratio plots
     if args.inject:
         hr_sig  = c.ratio_plot((h_sig,       h_bkg_nom), option='HIST', offset=1)
         pass
     h_err   = c.ratio_plot((h_sum,       h_bkg_nom), option='E2')
-    h_ratio = c.ratio_plot((h_data,      h_bkg_nom), markersize=0.8)
+    h_ratio = c.ratio_plot((h_data,      h_bkg_nom), oob=True)
     h_rgbs  = c.ratio_plot((h_gbs,       h_bkg_nom), linecolor=ROOT.kViolet + 1, option='HIST ][')
     h_rgbs  = c.ratio_plot((h_bkg_stripe,h_bkg_nom), linecolor=ROOT.kGreen  + 1, option='HIST ][')
     
@@ -207,33 +280,27 @@ def main ():
     c.xlabel('Signal jet mass [GeV]')
     c.ylabel('Events')
     p1.ylabel('Data / Nom.')
-    c.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",
-            "Sherpa incl. #gamma MC",
-            "Trimmed anti-k_{t}^{R=1.0} jets",
-            "ISR #gamma selection",
-            ("Signal" if args.inject else "No signal") + " injected",
-            ], 
-           qualifier='Simulation Internal')
+    c.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",] +
+           (["Sherpa incl. #gamma MC",] if not args.data else [])+
+           ["Trimmed anti-k_{t}^{R=1.0} jets",
+            "ISR #gamma selection",] +
+           (["Signal injected"] if args.inject else []),
+           qualifier='%sInternal' % ("Simulation " if not args.data else ""))
 
-    # Add line(s) and limit(s)
-    c.ylim(5E+01, 5E+06) # @TEMP
+    # Add line(s)
     p1.yline(1.0)
-    p1.ylim(0.8, 1.2)
-
-    # Configure axis padding and -scale
-    c.padding(0.35)
-    c.log(True)
 
     # Draw legend
     c.legend()
+    c.region("SR", 0.8 * args.mass, 1.2 * args.mass)
 
     # Save and show plot
-    if args.save: c.save('plots/globalbackground_spectrum_%dGeV_%s.pdf' % (args.mass, 'injected' if args.inject else 'notinjected'))
+    if args.save: c.save('plots/globalbackground_spectrum_%dGeV_%s_%s.pdf' % (args.mass, 'injected' if args.inject else 'notinjected', 'data' if args.data else 'MC'))
     if args.show: c.show()
 
 
     # p0-plot
-    # – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – 
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
     
     # Setup canvas
     c2 = ap.canvas(batch=not args.show)
@@ -272,16 +339,17 @@ def main ():
         c2.yline(ROOT.TMath.Erfc(sigma / np.sqrt(2)))
         pass
 
-    c2.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",
-            "Sherpa incl. #gamma MC",
-            "Trimmed anti-k_{t}^{R=1.0} jets",
+    c2.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",] + 
+            (["Sherpa incl. #gamma MC",] if not args.data else []) + 
+            ["Trimmed anti-k_{t}^{R=1.0} jets",
             "ISR #gamma selection",
             ("Signal" if args.inject else "No signal") + " injected" + (" at m = %d GeV" % args.mass if args.inject else ""),
             ], 
            qualifier='Simulation Internal')
 
+    c2.region("SR", 0.8 * args.mass, 1.2 * args.mass)
     c2.legend()
-    if args.save: c2.save('plots/globalbackground_p0_%dGeV_%s.pdf' % (args.mass, 'injected' if args.inject else 'notinjected'))
+    if args.save: c2.save('plots/globalbackground_p0_%dGeV_%s_%s.pdf' % (args.mass, 'injected' if args.inject else 'notinjected', 'data' if args.data else 'MC'))
     if args.show: c2.show()
     
     return
