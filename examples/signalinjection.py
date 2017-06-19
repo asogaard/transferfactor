@@ -388,7 +388,7 @@ def main ():
                     rdh_data = ROOT.RooDataHist('rdh_data', 'rdh_data', ROOT.RooArgList(mJ), h_data)
                     
                     # -- Fit pdf to data histogram
-                    pdf.chi2FitTo(rdh_data, ROOT.RooLinkedList(), ROOT.Strategy(0))
+                    pdf.chi2FitTo(rdh_data, ROOT.RooLinkedList())
                     
                     print "Best fit mu: %.3f +/- %.3f" % (mu.getValV(), mu.getError())
                     bestfit_mu.append( (mu.getValV(), mu.getError()) )

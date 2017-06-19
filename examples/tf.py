@@ -75,7 +75,6 @@ def main ():
     # Parse command-line arguments
     args = parser.parse_args()
 
-    #DSID = int("1%02d%03d" % (args.window * 100, args.mass))
     DSID = int("1%02d%03d" % (0 if args.window is None else args.window * 100, args.mass))
     
 
@@ -86,21 +85,26 @@ def main ():
     sig_DSID = get_signal_DSID(args.mass)
 
     # Load data
-    files_data = glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root') #glob.glob(tf.config['base_path'] + 'objdef_data_*.root')
+    #files_data = glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root') 
+    files_data = glob.glob(tf.config['base_path'] + 'objdef_data_*.root')
     files_WZ   = glob.glob(tf.config['base_path'] + 'objdef_MC_30543*.root') + \
                  glob.glob(tf.config['base_path'] + 'objdef_MC_30544*.root')    
     
     if sig_DSID is None:
-        print "Assuming signal is W/Z"
-        files_sig = files_WZ    
-        files_WZ  = []
+        if args.mass < 100.:
+            print "Assuming signal is W/Z"
+            files_sig = files_WZ    
+            files_WZ  = []
+        else:
+            files_sig = []
+            pass
     else:
         sig_file = 'objdef_MC_{DSID:6d}.root'.format(DSID=sig_DSID)
         print "Using signal file: %s" % sig_file
         files_sig = [tf.config['base_path'] + sig_file]
         pass
 
-    if len(files_data) == 0 or len(files_sig) == 0:
+    if len(files_data) == 0 or (sig_DSID and len(files_sig) == 0):
         warning("No files found.")
         return
 
@@ -120,7 +124,7 @@ def main ():
     # Append new DSID field # @TODO: Make more elegant?
     #for arr, info in zip([signal, WZ], [info_sig, info_WZ]):
 
-    # @TEMP >>>
+    '''# @TEMP >>>
     if data is not None:
         data = append_fields(data, 'DSID', np.zeros((data.size,)), dtypes=int)
         for idx in info_data['id']:    
@@ -131,7 +135,7 @@ def main ():
             pass
         #data['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
         pass
-    # @TEMP <<<
+    # @TEMP <<<'''
 
     if signal is not None:
         signal = append_fields(signal, 'DSID', np.zeros((signal.size,)), dtypes=int)
@@ -141,7 +145,7 @@ def main ():
             signal['weight'][msk] *= xsec[tmp_DSID] # Scale by cross section x filter eff. for this DSID
             signal['DSID']  [msk] = tmp_DSID        # Store DSID
             pass
-        #signal['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
+        signal['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
         pass
 
     if WZ is not None:
@@ -153,17 +157,19 @@ def main ():
             WZ['DSID']  [msk] = tmp_DSID        # Store DSID
             pass
         # @TODO: k-factors?
-        #WZ['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
+        WZ['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
         pass
 
     # Check output.
-    if data.size == 0 or signal.size == 0:
+    if data.size == 0 or ((signal is not None) and signal.size == 0):
         warning("No data was loaded. Exiting.")
         return 
 
     # Compute new variables
     data   = append_fields(data,   'logpt', np.log(data  ['pt']))
-    signal = append_fields(signal, 'logpt', np.log(signal['pt']))
+    if signal is not None:
+        signal = append_fields(signal, 'logpt', np.log(signal['pt']))
+        pass
     if WZ is not None:
         WZ = append_fields(WZ,     'logpt', np.log(WZ    ['pt']))
         pass
@@ -175,8 +181,10 @@ def main ():
     # Pass/fail masks
     msk_data_pass = tf.config['pass'](data)
     msk_data_fail = ~msk_data_pass
-    msk_sig_pass  = tf.config['pass'](signal)
-    msk_sig_fail  = ~msk_sig_pass
+    if signal is not None:
+        msk_sig_pass  = tf.config['pass'](signal)
+        msk_sig_fail  = ~msk_sig_pass
+        pass
     if WZ is not None:
         msk_WZ_pass   = tf.config['pass'](WZ)
         msk_WZ_fail   = ~msk_WZ_pass
@@ -192,8 +200,10 @@ def main ():
        
         print "  -- Computing data weights"
         w_nom,     w_up,     w_down      = calc.fullweights(data  [msk_data_fail])
-        print "  -- Computing signal weights"
-        w_sig_nom, w_sig_up, w_sig_down  = calc.fullweights(signal[msk_sig_fail])
+        if signal is not None:
+            print "  -- Computing signal weights"
+            w_sig_nom, w_sig_up, w_sig_down  = calc.fullweights(signal[msk_sig_fail])
+            pass
         if WZ is not None:
             print "  -- Computing W/Z weights"
             w_WZ_nom, w_WZ_up, w_WZ_down = calc.fullweights(WZ    [msk_WZ_fail])
@@ -217,10 +227,12 @@ def main ():
         w_nom  = calc.weights(data[msk_data_fail])
         w_up   = calc.weights(data[msk_data_fail], shift=+1)
         w_down = calc.weights(data[msk_data_fail], shift=-1)
-        print "  -- Computing signal weights"
-        w_sig_nom  = calc.weights(signal[msk_sig_fail])
-        w_sig_up   = calc.weights(signal[msk_sig_fail], shift=+1)
-        w_sig_down = calc.weights(signal[msk_sig_fail], shift=-1)
+        if signal is not None:
+            print "  -- Computing signal weights"
+            w_sig_nom  = calc.weights(signal[msk_sig_fail])
+            w_sig_up   = calc.weights(signal[msk_sig_fail], shift=+1)
+            w_sig_down = calc.weights(signal[msk_sig_fail], shift=-1)
+            pass
         if WZ is not None:
             print "  -- Computing W/Z weights"
             w_WZ_nom, = calc.weights(WZ[msk_WZ_fail])
@@ -232,7 +244,8 @@ def main ():
         print "  -- Manual fit done"
         if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/tf_', MC=False)
         pass
-    
+
+
     
     # Computing data-driven background estimate
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
@@ -294,46 +307,48 @@ def main ():
         
 
     # Write TF-scaled failing signal MC to file
-    output = ROOT.TFile('output/objdef_TF_{DSID:6d}_signalfail.root'.format(DSID=DSID), 'RECREATE')
-    
-    for shift, w_sig in zip([0, 1, -1], [w_sig_nom, w_sig_up, w_sig_down]):
-               
-        # -- Get branch name for current variation
-        var_name = 'Nominal' if shift == 0 else ('TF_UP' if shift == 1 else 'TF_DOWN')
+    if signal is not None:
+        output = ROOT.TFile('output/objdef_TF_{DSID:6d}_signalfail.root'.format(DSID=DSID), 'RECREATE')
+        
+        for shift, w_sig in zip([0, 1, -1], [w_sig_nom, w_sig_up, w_sig_down]):
+            
+            # -- Get branch name for current variation
+            var_name = 'Nominal' if shift == 0 else ('TF_UP' if shift == 1 else 'TF_DOWN')
+            
+            # -- Prepare mass- and weight vectors
+            vector_m = signal['m']     [msk_sig_fail]
+            vector_w = signal['weight'][msk_sig_fail] * w_sig
+            
+            # -- Prepare DISD and isMC vectors
+            vector_DSID = np.ones_like(vector_w) * (DSID + 1E+05)
+            vector_isMC = np.ones_like(vector_w).astype(bool)
+            
+            array1 = np.array(zip(vector_m, vector_w),
+                              dtype = [(tf.config['prefix'] + 'm', np.float64),
+                                       ('weight',                  np.float64)])
+            
+            array2 = np.array(zip(vector_DSID, vector_isMC),
+                              dtype = [('DSID', np.uint32),
+                                       ('isMC', np.bool_)])
+            
+            # Mass and weight branch
+            print "  Writing arrays to file: %s" % var_name
+            treename1 = tf.config['tree'].replace('NumLargeRadiusJets', 'Jet_tau21DDT').replace('Nominal', var_name)
+            make_directories('/'.join(treename1.split('/')[:-1]), fromDir=output)
+            tree1 = ROOT.TTree(treename1.split('/')[-1], "")
+            array2tree(array1, tree=tree1)
+            
+            # outputTree
+            treename2 = tf.config['outputtree'].replace('Nominal', var_name)
+            make_directories('/'.join(treename2.split('/')[:-1]), fromDir=output)
+            tree2 = ROOT.TTree(treename2.split('/')[-1], "")
+            array2tree(array2, tree=tree2)
+            
+            output.Write()        
+            pass
 
-        # -- Prepare mass- and weight vectors
-        vector_m = signal['m']     [msk_sig_fail]
-        vector_w = signal['weight'][msk_sig_fail] * w_sig
-        
-        # -- Prepare DISD and isMC vectors
-        vector_DSID = np.ones_like(vector_w) * (DSID + 1E+05)
-        vector_isMC = np.ones_like(vector_w).astype(bool)
-        
-        array1 = np.array(zip(vector_m, vector_w),
-                          dtype = [(tf.config['prefix'] + 'm', np.float64),
-                                   ('weight',                  np.float64)])
-        
-        array2 = np.array(zip(vector_DSID, vector_isMC),
-                          dtype = [('DSID', np.uint32),
-                                   ('isMC', np.bool_)])
-        
-        # Mass and weight branch
-        print "  Writing arrays to file: %s" % var_name
-        treename1 = tf.config['tree'].replace('NumLargeRadiusJets', 'Jet_tau21DDT').replace('Nominal', var_name)
-        make_directories('/'.join(treename1.split('/')[:-1]), fromDir=output)
-        tree1 = ROOT.TTree(treename1.split('/')[-1], "")
-        array2tree(array1, tree=tree1)
-        
-        # outputTree
-        treename2 = tf.config['outputtree'].replace('Nominal', var_name)
-        make_directories('/'.join(treename2.split('/')[:-1]), fromDir=output)
-        tree2 = ROOT.TTree(treename2.split('/')[-1], "")
-        array2tree(array2, tree=tree2)
-
-        output.Write()        
+        output.Close()
         pass
-
-    output.Close()
         
     # Save configuration
     check_make_dir('logs')
