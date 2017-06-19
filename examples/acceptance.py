@@ -10,7 +10,7 @@
 """
 
 # Basic import(s)
-import sys, glob
+import sys, glob, re
 
 # Get ROOT to stop hogging the command-line options
 import ROOT
@@ -63,109 +63,118 @@ def main ():
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
     # Load data
-    files  = glob.glob(tf.config['base_path'] + 'objdef_MC_30836*.root')
+    files = glob.glob(tf.config['base_path'] + 'objdef_MC_30836*.root')
 
     if len(files) == 0:
         warning("No files found.")
         return
 
-    cats = ['Pass', 'Fail']
-    data = {cat: loadData(files, tf.config['finaltree'].replace('Pass', cat), prefix=tf.config['prefix']) for cat in cats}
+    colours = [ROOT.kViolet + 7, ROOT.kAzure + 7, ROOT.kTeal, ROOT.kSpring - 2, ROOT.kOrange - 3, ROOT.kPink]
+    masses = np.array([100, 130, 160, 190, 220], dtype=float)
+    DSIDs  = [int(re.search('objdef_MC_(\d{6})\.root', f).group(1)) for f in files]
+
+
+    # Plot jet-level acceptance versus signal mass point
+    # --------------------------------------------------------------------------
+
+    counts = dict()
+    labels = list()
+    base_events = dict()
+    for DSID, filename in zip(DSIDs, files):
+        f = ROOT.TFile(filename, 'READ')
+        cutflow = f.Get('BoostedJet+ISRgamma/Nominal/LargeRadiusJets/Nominal/Cutflow')
+        ax = cutflow.GetXaxis()
+        for bin in range(1, ax.GetNbins() + 1):
+            label = ax.GetBinLabel(bin)
+            if label not in counts: counts[label] = dict()
+            if len(labels) < bin:   labels.append(label)
+            counts[label][DSID] = cutflow.GetBinContent(bin)
+            pass
+
+        # Get number of events passing pre-selection
+        cutflow = f.Get('BoostedJet+ISRgamma/Nominal/PreSelection/Nominal/Cutflow')
+        base_events[DSID] = cutflow.GetBinContent(cutflow.GetXaxis().GetNbins())
+        pass
+    
+    acceptances = {DSID: np.zeros((len(labels),)) for DSID in DSIDs}
+    for idx, label in enumerate(labels):
+        for DSID in DSIDs:
+            acceptances[DSID][idx] = counts[label][DSID] / float(base_events[DSID]) #float(counts[labels[0]][DSID])
+            pass
+        pass
+
+    c = ap.canvas(batch=not args.show)
+    names = ["Pre-seleciton", "|#eta| < 2.0", "p_{T} > 200 GeV", "#Delta(#phi,J) > #pi/2", "p_{T} > 2 #times m", "#rho^{DDT} > 1.5"]
+    for idx, (label, name) in enumerate(zip(labels, names)):
+        acceptance_values = np.array([acceptances[DSID][idx] for DSID in DSIDs])
+        acc = ROOT.TGraphErrors(len(DSIDs), masses, acceptance_values)
+        c.graph(acc, linecolor=colours[idx], markercolor=colours[idx], linewidth=2, option=('A' if idx == 0 else '') + 'PL', label=name, legend_option='PL') 
+        pass
+
+    c.padding(0.5)
+    c.xlabel("Signal mass point [GeV]")
+    c.ylabel("#LTNum. large-#it{R} jets / event#GT")
+    c.text(["#sqrt{s} = 13 TeV", "ISR #gamma channel", "Jet selection"], qualifier="Simulation Internal")
+    c.legend()
+    if args.save: c.save('plots/acceptance_jet.pdf')
+    if args.show: c.show()
+
+
+    # Plot event-level acceptance versus signal mass point
+    # --------------------------------------------------------------------------
+    
+    treenames = ['BoostedJet+ISRgamma/Nominal/PreSelection/Nominal/HLT_g140_loose/Postcut',
+                 tf.config['finaltree'].replace('Jet_tau21DDT', 'NumPhotons'), 
+                 tf.config['finaltree'].replace('Jet_tau21DDT', 'NumLargeRadiusJets'), 
+                 tf.config['finaltree']]
+    data = {treename: loadData(files, treename, prefix=tf.config['prefix']) for treename in treenames}
     info = loadData(files, tf.config['outputtree'], stop=1)
 
     # Scaling by cross section
     xsec = loadXsec(tf.config['xsec_file'])
     
     # Append new DSID field # @TODO: Make more elegant?
-    for cat in cats:
-        data[cat] = append_fields(data[cat], 'DSID', np.zeros((data[cat].size,)), dtypes=int)
+    for key in data:
+        data[key] = append_fields(data[key], 'DSID', np.zeros((data[key].size,)), dtypes=int)
         for idx in info['id']:    
-            msk = (data[cat]['id'] == idx) # Get mask of all 'data' entries with same id, i.e. from same file
+            msk = (data[key]['id'] == idx) # Get mask of all 'data' entries with same id, i.e. from same file
             DSID = info['DSID'][idx]  # Get DSID for this file
-            data[cat]['weight'][msk] *= xsec[DSID] # Scale by cross section x filter eff. for this DSID
-            data[cat]['DSID']  [msk] = DSID        # Store DSID
+            data[key]['weight'][msk] *= xsec[DSID] # Scale by cross section x filter eff. for this DSID
+            data[key]['DSID']  [msk] = DSID        # Store DSID
             pass
-        data[cat]['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
+        data[key]['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
         pass
 
     # Check output.
-    if 0 in [data[cat].size for cat in cats]:
+    if 0 in [data[key].size for key in data]:
         warning("No data was loaded.")
         return 
 
-    # Compute new variables
-    for cat in cats:
-        data[cat] = append_fields(data[cat], 'logpt', np.log(data[cat]['pt']))
-        pass
-
-
-    # Plot acceptance versus signal mass point
-    # --------------------------------------------------------------------------
-    
-    DSIDs = sorted(list(set(data['Pass']['DSID'])))
     base_events     = np.array([50000., 48000., 50000., 50000., 48000.], dtype=float)
-    accepted_events = np.zeros_like(base_events)
-    passed_events   = np.zeros_like(base_events)
+    acceptances = list()
 
-    for idx, DSID in enumerate(DSIDs):
-        num_pass = np.sum(data['Pass']['DSID'] == DSID)
-        num_fail = np.sum(data['Fail']['DSID'] == DSID)
+    for key in treenames:
+        accepted_events = np.zeros_like(base_events)
 
-        accepted_events[idx] = num_pass + num_fail
-        passed_events  [idx] = num_pass
+        for idx, DSID in enumerate(DSIDs):
+            accepted_events[idx] = np.sum(data[key]['DSID'] == DSID)
+            pass
+
+        acceptances.append(accepted_events / base_events)
         pass
 
-    acceptance  = accepted_events / base_events
-    efficiency  = passed_events / accepted_events
-
-
-    # Binomial uncertainty of fraction 'f' given 'base_events' trials.
-    acceptance_uncertainties = np.sqrt(acceptance * (1. - acceptance) / base_events)
-    efficiency_uncertainties = np.sqrt(efficiency * (1. - efficiency) / accepted_events)
-    acc_eff_uncertainties    = np.sqrt(acceptance * efficiency * (1. - acceptance * efficiency)  / accepted_events)
-
-    masses = np.array([100, 130, 160, 190, 220], dtype=float)
-
-    acc_e = ROOT.TGraphErrors(len(DSIDs), masses, acceptance, np.zeros_like(acceptance_uncertainties), acceptance_uncertainties)
-    acc   = ROOT.TGraphErrors(len(DSIDs), masses, acceptance)
-
-    eff_e = ROOT.TGraphErrors(len(DSIDs), masses, efficiency, np.zeros_like(efficiency_uncertainties), efficiency_uncertainties)
-    eff   = ROOT.TGraphErrors(len(DSIDs), masses, efficiency)
-
-    acceff_e = ROOT.TGraphErrors(len(DSIDs), masses, acceptance * efficiency, np.zeros_like(acc_eff_uncertainties), acc_eff_uncertainties)
-    acceff   = ROOT.TGraphErrors(len(DSIDs), masses, acceptance * efficiency)
-
-    # Plot: Acceptance
+    # Plot: Event-levle ecceptance
     c = ap.canvas(batch=not args.show)
-    c.graph(acc_e, linecolor=ROOT.kAzure+2, linewidth=2, fillcolor=ROOT.kAzure+7, option='A3', label='ISR #gamma channel', legend_option='FL') 
-    c.graph(acc,   linecolor=ROOT.kAzure+2, linewidth=2, option='L')
+    names = ["Pre-selection", "= 1 #gamma", "#geq 1 jet", "#tau_{21}^{DDT} < 0.5"]
+    for icut, (name, acceptance) in enumerate(zip(names,acceptances)):
+        acc = ROOT.TGraphErrors(len(DSIDs), masses, acceptances[icut])
+        c.graph(acc, linecolor=colours[icut], markercolor=colours[icut], linewidth=2, option=('A' if icut == 0 else '') + 'PL', label=name, legend_option='PL') 
+        pass
     c.xlabel("Signal mass point [GeV]")
     c.ylabel("Acceptance (Z' #rightarrow large-#it{R} jet + #gamma)")
-    c.text(["#sqrt{s} = 13 TeV"], qualifier="Simulation Internal")
+    c.text(["#sqrt{s} = 13 TeV", "ISR #gamma channel", "Event selection"], qualifier="Simulation Internal")
     c.legend()
-    if args.save: c.save('plots/acceptance.pdf')
-    if args.show: c.show()
-
-    # Plot: Efficiency
-    c = ap.canvas(batch=not args.show)
-    c.graph(eff_e, linecolor=ROOT.kAzure+2, linewidth=2, fillcolor=ROOT.kAzure+7, option='A3', label='ISR #gamma channel', legend_option='FL') 
-    c.graph(eff,   linecolor=ROOT.kAzure+2, linewidth=2, option='L')
-    c.xlabel("Signal mass point [GeV]")
-    c.ylabel("Efficiency (Z' #rightarrow large-#it{R} jet + #gamma)")
-    c.text(["#sqrt{s} = 13 TeV"], qualifier="Simulation Internal")
-    c.legend()
-    if args.save: c.save('plots/efficiency.pdf')
-    if args.show: c.show()
-
-    # Plot: Acceptance x efficiency
-    c = ap.canvas(batch=not args.show)
-    c.graph(acceff_e, linecolor=ROOT.kAzure+2, linewidth=2, fillcolor=ROOT.kAzure+7, option='A3', label='ISR #gamma channel', legend_option='FL') 
-    c.graph(acceff,   linecolor=ROOT.kAzure+2, linewidth=2, option='L')
-    c.xlabel("Signal mass point [GeV]")
-    c.ylabel("Acc #times eff (Z' #rightarrow large-#it{R} jet + #gamma)")
-    c.text(["#sqrt{s} = 13 TeV"], qualifier="Simulation Internal")
-    c.legend()
-    if args.save: c.save('plots/acceptance_times_efficiency.pdf')
+    if args.save: c.save('plots/acceptance_event.pdf')
     if args.show: c.show()
 
     return
