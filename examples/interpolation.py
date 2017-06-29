@@ -86,6 +86,8 @@ def main ():
     variations = [key.GetName() for key in ROOT.gDirectory.GetListOfKeys()]
     f.Close()
 
+    colours = [ROOT.kViolet + 7, ROOT.kAzure + 7, ROOT.kTeal, ROOT.kSpring - 2, ROOT.kOrange - 3, ROOT.kPink]
+
     # Load data
     if not args.isrjet:
         data = {var: loadData(files, tf.config['finaltree'].replace('Nominal', var), prefix=tf.config['prefix']) for var in variations}
@@ -142,16 +144,23 @@ def main ():
     workspace = ROOT.RooWorkspace()
 
     # Create variables
-    mJ = workspace.factory('mJ[50,300]')
     mZ = workspace.factory('mZ[50,300]') # this is our continuous interpolation parameter
+
+    mJ = workspace.factory('mJ[50,300]')
     mJ.setBins(50)
     frame = mJ.frame()
 
+
     # Create fit model
     for i in range(len(massPoints)):
-        workspace.factory('Gaussian::g{i}(mJ, mu{i}[{mean},0,300], sigma{i}[{width},0,50])'.format(i=i, mean=massPoints[i], width=massPoints[i]*0.1))
-        workspace.factory('Gaussian::gb{i}(mJ, mu_b{i}[0,0,0], sigma_b{i}[100,50,500])'.format(i=i))
-        workspace.factory('SUM::model{i}(s{i}[1,0,10]*g{i}, b{i}[0.5,0,10]*gb{i})'.format(i=i))
+        workspace.factory('Gaussian::signal{i}(mJ, mu_sig_{i}[{mean},0,300], sigma_sig_{i}[{width},0,50])'.format(i=i, mean=massPoints[i], width=massPoints[i]*0.1))
+        if not args.isrjet:
+            workspace.factory('Gaussian::background{i}(mJ, mu_bkg_{i}[0,0,0], sigma_bkg_{i}[100,50,500])'.format(i=i))
+        else:
+            workspace.factory('Exponential::background{i}(mJ, tau_bkg_{i}[-0.01,-100,0])'.format(i=i))
+            pass
+
+        workspace.factory('SUM::model{i}(norm_sig_{i}[2,0,10]*signal{i}, norm_bkg_{i}[1,1,1]*background{i})'.format(i=i))
         pass
 
     # Create p.d.f.s
@@ -185,30 +194,34 @@ def main ():
         pdfs[idx].chi2FitTo(rdh, ROOT.RooLinkedList())
 
         # Plot data histogram and fit
-        rhp      .plotOn(frame, ROOT.RooFit.LineColor(1), ROOT.RooFit.LineStyle(1), ROOT.RooFit.LineWidth(idx+1))
-        pdfs[idx].plotOn(frame, ROOT.RooFit.LineColor(2), ROOT.RooFit.LineStyle(2))
+        rhp      .plotOn(frame, ROOT.RooFit.LineColor(colours[idx]), ROOT.RooFit.LineStyle(1), ROOT.RooFit.LineWidth(3))
+        pdfs[idx].plotOn(frame, ROOT.RooFit.LineColor(ROOT.kBlack), ROOT.RooFit.LineStyle(2))
         pass
 
-    #setting = ROOT.RooMomentMorph.Linear
-    setting = ROOT.RooMomentMorph.NonLinearLinFractions
-    setting = ROOT.RooMomentMorph.NonLinearPosFractions
-    setting = ROOT.RooMomentMorph.NonLinear
-    setting = ROOT.RooMomentMorph.SineLinear
     setting = ROOT.RooMomentMorph.Linear
     morph = ROOT.RooMomentMorph('morph', 'morph', mZ, ROOT.RooArgList(mJ), pdfs, massVec, setting)
     getattr(workspace,'import')(morph) # work around for morph = w.import(morph)
     morph.Print('v')
 
     # Make plots of interpolated p.d.f.s
-    interpolationMassPoints = np.linspace(100, 220, (220 - 100) / 5 + 1, endpoint=True)
-    #interpolationMassPoints = sorted(list(set(interpolationMassPoints) - set(massPoints)))
-    for i, mass in enumerate(interpolationMassPoints):
-        print i, mass
+    interpolationMassPoints = np.linspace(100, 220, (220 - 100) / 10 + 1, endpoint=True)
+    interpolationMassPoints = sorted(list(set(interpolationMassPoints) - set(massPoints)))
+    """ @TEMP: BEGIN """
+    # -- Interpolate logarithmically between integrals
+    interpolationIntegrals = np.exp(np.interp(interpolationMassPoints, massPoints, np.log(integrals)))
+        
+    # -- Interpolate linearly between event counts
+    interpolationEvents    =        np.interp(interpolationMassPoints, massPoints, events).astype(int)   
+    """ @TEMP: END """
+
+    for i, (n, integral, mass) in enumerate(zip(interpolationEvents, interpolationIntegrals, interpolationMassPoints)):
+        #for i, mass in enumerate(interpolationMassPoints):
+        print "=" * 80
         mZ.setVal(mass)
         mZ.Print()
-        morph.plotOn(frame, ROOT.RooFit.LineColor(ROOT.kBlue), ROOT.RooFit.LineStyle(2), ROOT.RooFit.LineWidth(1))
+        morph.Print()
+        morph.plotOn(frame, ROOT.RooFit.LineColor(ROOT.kRed - 4), ROOT.RooFit.LineStyle(2), ROOT.RooFit.LineWidth(1))
         pass
-    interpolationMassPoints = sorted(list(set(interpolationMassPoints) - set(massPoints)))
 
     # Interpolation closure
     if closure:
@@ -242,11 +255,22 @@ def main ():
 
     # Draw frame
     if args.show or args.save:
-        canv = ROOT.TCanvas('canv', "")
+        c = ap.canvas(batch=not args.show)
+        c.pads()[0]._bare().cd()
         frame.Draw()
-        ROOT.gPad.Update()        
-        if args.save: canv.SaveAs('plots/interpolation_frame_isr%s.pdf' % ('gamma' if not args.isrjet else 'jet'))
-        if args.show: wait()    
+        frame.GetXaxis().SetTitle("Large-#it{R} jet mass [GeV]")
+        frame.GetYaxis().SetTitle("Signal p.d.f.")
+        frame.GetYaxis().SetRangeUser(0, 0.22)
+        c.text(["#sqrt{s} = 13 TeV", "ISR %s channel" % ('#gamma' if not args.isrjet else 'jet')], qualifier="Simulation Internal")
+        c.legend(header="Signal MC shape:",
+                 categories= [ ("Z' (%d GeV)" % mass, {'linecolor': colours[idx], 'linewidth': 3, 'option': 'L'}) for idx, mass in enumerate(massPoints)]
+                + [
+                ("Fitted  shape",      {'linecolor': ROOT.kBlack,   'linestyle': 2, 'linewidth': 2, 'option': 'L'}),
+                ("Interpolated shape", {'linecolor': ROOT.kRed - 4, 'linestyle': 2, 'linewidth': 1, 'option': 'L'}),
+                ])
+        c.ylim(0, 0.22)
+        if args.save: c.save('plots/interpolation_frame_isr%s.pdf' % ('gamma' if not args.isrjet else 'jet'))
+        if args.show: c.show()
         pass
 
     # Write outputs
