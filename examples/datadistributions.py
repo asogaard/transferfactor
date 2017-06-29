@@ -69,8 +69,6 @@ def main ():
     TF_DSID = int("100%03d" % (args.mass))
     signal_DSID = get_signal_DSID(args.mass)
     signal = bool(signal_DSID)
-    #if not signal_DSID:
-    #    return
 
     # Load data
     files = {
@@ -237,7 +235,7 @@ def main ():
         
         # -- Histograms: Ratio pad
         if signal:
-            c.ratio_plot((h_sig,      h_sum), option='HIST', offset=1, fillcolor=ROOT.kRed - 4)
+            c.ratio_plot((h_sig,      h_sum), option='HIST', offset=1)
             pass
         c.ratio_plot((h_sum,      h_sum), option='E2')
         c.ratio_plot((h_bkg_up,   h_sum), option='HIST')
