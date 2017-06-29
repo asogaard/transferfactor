@@ -83,13 +83,13 @@ def main ():
     sig_file = 'objdef_MC_{DSID:6d}.root'.format(DSID=sig_DSID)
 
     # Load data
-    if args.data:
-        files = glob.glob(tf.config['base_path'] + 'objdef_data_*.root')
-    else:
-        files = glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root')
-        pass
+    files = {
+        'data': glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root'),
+        'gbs':  glob.glob(tf.config['base_path'] + 'objdef_GBSMC_400001.root'),
+        'WZ':   glob.glob(tf.config['base_path'] + 'objdef_MC_3054*.root')
+        }
     if args.inject:
-        files += [tf.config['base_path'] + sig_file]
+        files['sig'] = glob.glob(tf.config['base_path'] + sig_file)
         pass
 
     if len(files) == 0:
@@ -97,31 +97,69 @@ def main ():
         warning(" $ source getSomeData.sh")
         return
 
-    data = loadData(files, tf.config['tree'], prefix=tf.config['prefix'])
-    info = loadData(files, tf.config['outputtree'], stop=1)
+    data   = loadData(files['data'], tf.config['tree'],      prefix=tf.config['prefix'])
+    gbs    = loadData(files['gbs'],  tf.config['finaltree'], prefix=tf.config['prefix'])
+    WZ     = loadData(files['WZ'],   tf.config['tree'],      prefix=tf.config['prefix'])
+    if args.inject:
+        signal = loadData(files['sig'], tf.config['tree'],   prefix=tf.config['prefix'])
+    else:
+        signal = None
+        pass
+    info   = {key: loadData(files[key], tf.config['outputtree'], stop=1) for key in files}
 
     # Scaling by cross section
     xsec = loadXsec(tf.config['xsec_file'])
 
     # Append new DSID field
-    data = append_fields(data, 'DSID', np.zeros((data.size,)), dtypes=int)
-    for idx, id in enumerate(info['id']):
-        msk = (data['id'] == id) # Get mask of all 'data' entries with same id, i.e. from same file
-        DSID = info['DSID'][idx]  # Get DSID for this file
-        if info['isMC'][idx]:
-            data['weight'][msk] *= xsec[DSID] # Scale by cross section x filter eff. for this DSID
-            data['DSID']  [msk] = DSID # Store DSID
-            data['weight'][msk] *= tf.config['lumi']
+    if args.inject:
+        signal = append_fields(signal, 'DSID', np.zeros((signal.size,)), dtypes=int)
+        for idx, id in enumerate(info['sig']['id']):
+            msk = (signal['id'] == id) # Get mask of all 'signal' entries with same id, i.e. from same file
+            DSID = info['sig']['DSID'][idx]  # Get DSID for this file
+            signal['weight'][msk] *= xsec[DSID] # Scale by cross section x filter eff. for this DSID
+            signal['DSID']  [msk] = DSID # Store DSID
             pass
+        signal['weight'] *= tf.config['lumi']
         pass
-    data = append_fields(data, 'logpt', np.log(data['pt']))
+
+    WZ = append_fields(WZ, 'DSID', np.zeros((WZ.size,)), dtypes=int)
+    for idx, id in enumerate(info['WZ']['id']):
+        msk = (WZ['id'] == id) # Get mask of all 'WZ' entries with same id, i.e. from same file
+        DSID = info['WZ']['DSID'][idx]  # Get DSID for this file
+        WZ['weight'][msk] *= xsec[DSID] # Scale by cross section x filter eff. for this DSID
+        WZ['DSID']  [msk] = DSID # Store DSID
+        pass
+    WZ['weight'] *= tf.config['lumi']
+
+    #if not args.data:
+    data = append_fields(data, 'DSID', np.zeros((data.size,)), dtypes=int)
+    for idx, id in enumerate(info['data']['id']):
+        msk = (data['id'] == id) # Get mask of all 'data' entries with same id, i.e. from same file
+        DSID = info['data']['DSID'][idx]  # Get DSID for this file
+        data['weight'][msk] *= xsec[DSID] # Scale by cross section x filter eff. for this DSID
+        data['DSID']  [msk] = DSID # Store DSID
+        pass
+    data['weight'] *= tf.config['lumi']
+    #pass
+
+    # Compute new variables
+    data       = append_fields(data,   'logpt', np.log(data  ['pt']))
+    WZ         = append_fields(WZ,     'logpt', np.log(WZ    ['pt']))
+    if signal is not None:
+        signal = append_fields(signal, 'logpt', np.log(signal['pt']))
+        pass
+
+    # Inject signal into data
+    if args.inject:
+        data = np.array(np.concatenate((data,signal)), dtype=data.dtype)
+        pass
+    #if not args.data:
+    data = np.array(np.concatenate((data,WZ)), dtype=data.dtype)
+    #pass
+
+    """ @TODO: Not sure this script works for data input... But it's not used anyway. """
+
     
-    msk_sig  = (data['DSID'] == sig_DSID)
-    msk_data = ~msk_sig
-
-    signal = data[msk_sig]
-
- 
     # Transfer factor
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
@@ -130,137 +168,86 @@ def main ():
     msk_pass = tf.config['pass'](data)
     msk_fail = ~msk_pass
 
+    # -- W/Z
+    msk_WZ_pass = tf.config['pass'](WZ)
+    msk_WZ_fail = ~msk_WZ_pass
+
     # -- Signal
-    msk_sig_pass = tf.config['pass'](signal)
-    msk_sig_fail = ~msk_sig_pass
+    if args.inject:
+        msk_sig_pass = tf.config['pass'](signal)
+        msk_sig_fail = ~msk_sig_pass
+        pass
 
     # Transfer factor calculator instance
-    calc = tf.calculator(data=data, config=tf.config)
+    calc = tf.calculator(data=data, config=tf.config, subtract=WZ)
     
     # Nominal fit
     calc.fit()
-    w_nom = calc.weights(data[msk_fail])
+    w_nom    = calc.weights(data[msk_fail])
+    w_nom_WZ = calc.weights(WZ  [msk_WZ_fail])
     if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/globalbackground_%s_%s_' % ('injected' if args.inject else 'notinjected', 'data' if args.data else 'MC'))
 
     # mass +/- 20% stripe fit
     calc.mass   = args.mass
     calc.window = 0.2
     calc.fit()
-    w_stripe     = calc.weights(data[msk_fail])
-    w_stripe_sig = calc.weights(data[msk_sig_fail])
-    
-
-    # Global background shape (GBS)
-    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-    masses = np.linspace(100, 250, 30 + 1, endpoint=True) # GBS mass bins
-    N = data.size
-
-    weights_bkg_nom  = np.zeros((N,), dtype=float)
-    weights_bkg_up   = np.zeros((N,), dtype=float)
-    weights_bkg_down = np.zeros((N,), dtype=float)
-    counter_bkg      = np.zeros((N,), dtype=float)
-
-    ctemp = ap.canvas(batch=True)
-    for mass in masses:
-        print " --", mass
-
-        # Fit TF profile
-        calc.mass = mass
-        calc.fullfit()
-
-        if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/tf_gbs_', MC=False)
-
-        # Get TF weights
-        w_nom, w_up, w_down = calc.fullweights(data[msk_fail])
-
-        # Compute mask for which jets to use in GBS computation
-        msk_fail_window=~(np.abs(data[msk_fail]['m'] - mass) < 0.2 * mass)
-        msk_window     =~(np.abs(data['m']           - mass) < 0.2 * mass)
-
-        # Store weights and increment counter for masked jets
-        weights_bkg_nom [msk_window & msk_fail] += w_nom [msk_fail_window]
-        weights_bkg_up  [msk_window & msk_fail] += w_up  [msk_fail_window]
-        weights_bkg_down[msk_window & msk_fail] += w_down[msk_fail_window]
-        counter_bkg     [msk_window & msk_fail] += 1.
-        print np.sum(counter_bkg)
+    w_stripe         = calc.weights(data[msk_fail])
+    w_stripe_WZ      = calc.weights(WZ  [msk_WZ_fail])
+    if args.inject:
+        w_stripe_sig = calc.weights(signal[msk_sig_fail])
         pass
-
-    return
-
-    """
-    # Get GBS
-    #bins = tf.config['massbins']
-    bins = np.linspace(100, 250, 30 + 1, endpoint=True)
-
-    masses = np.linspace(100, 250, 30 + 1, endpoint=True) # bins
-    dict_backgrounds = dict()
-    ctemp = ap.canvas(batch=True)
-    for mass in masses:
-        print " --", mass
-
-        # Fit TF profile
-        calc.mass = mass
-        calc.fit()
-        if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/globalbackground_%dGeV_%s_%s_' % (args.mass, 'injected' if args.inject else 'notinjected', 'data' if args.data else 'MC'))
-
-        # Get TF weights
-        w = calc.weights(data[msk_fail])
-
-        # Compute background distribution for this mass point
-        dict_backgrounds[mass] = hist2array( ctemp.hist(data['m'][msk_fail], bins=bins, weights=data['weight'][msk_fail] * w, display=False) )
-
-        # Store SR bin values (bin center within 20% if mass point)
-        bincentres = bins[:-1] + (bins[1] - bins[0]) / 2.
-        dict_backgrounds[mass] = np.ma.array(dict_backgrounds[mass], mask=~(np.abs(bincentres - mass) < 0.2 * mass))
-        pass
-
-    # Convert backgrounds from dict to numpy.ma.array
-    backgrounds = np.ma.zeros((len(masses), len(bins) - 1))
-    for idx, mass in enumerate(masses):
-        backgrounds[idx,:] = dict_backgrounds[mass]
-        pass
-        """
-
+   
     
     # Plotting
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+    bins = np.linspace(100, 250, 30 + 1, endpoint=True) 
     
     # Setup canvas
     c = ap.canvas(num_pads=2, batch=not args.show)
     p0, p1 = c.pads()
 
     # Add stacked backgrounds
-    h_bkg_nom    = c.hist(data  ['m'][msk_fail],     bins=bins, weights=data  ['weight'][msk_fail] * w_nom, display=False);
+    h_bkg_nom     = c.hist(data  ['m'][msk_fail],     bins=bins, weights=data  ['weight'][msk_fail] * w_nom,            display=False)
+    h_bkg_stripe  = c.hist(data  ['m'][msk_fail],     bins=bins, weights=data  ['weight'][msk_fail] * w_stripe,         display=False)
+    h_WZfl_nom    = c.hist(WZ    ['m'][msk_WZ_fail],  bins=bins, weights=WZ    ['weight'][msk_WZ_fail] * w_nom_WZ,      display=False)
+    h_WZfl_stripe = c.hist(WZ    ['m'][msk_WZ_fail],  bins=bins, weights=WZ    ['weight'][msk_WZ_fail] * w_stripe_WZ,   display=False)
     if args.inject:
-        h_sig    = c.hist(signal['m'][msk_sig_pass], bins=bins, weights=signal['weight'][msk_sig_pass], display=False)
-        h_sfl    = c.hist(signal['m'][msk_sig_fail], bins=bins, weights=signal['weight'][msk_sig_fail] * w_stripe_sig, display=False)
+        h_sig     = c.hist(signal['m'][msk_sig_pass], bins=bins, weights=signal['weight'][msk_sig_pass],                display=False)
+        h_sfl     = c.hist(signal['m'][msk_sig_fail], bins=bins, weights=signal['weight'][msk_sig_fail] * w_stripe_sig, display=False)
         pass
-    h_bkg_stripe = c.hist (data  ['m'][msk_fail],     bins=bins, weights=data  ['weight'][msk_fail] * w_stripe, display=False)
-    h_gbs        = c.hist(backgrounds.mean(axis=0),   bins=bins, display=False)
+    h_gbs         = c.hist(gbs   ['m'],               bins=bins, weights=gbs   ['weight'],                              display=False)
 
     # -- Subtract (opt.)
     if args.inject:
         h_bkg_stripe.Add(h_sfl, -1)
         h_gbs       .Add(h_sfl, -1)
         pass
+    h_bkg_nom   .Add(h_WZfl_nom,    -1)
+    h_bkg_stripe.Add(h_WZfl_stripe, -1)
 
     # -- Actually draw
+    #if not args.data:
+    h_WZ         = c.stack(WZ['m'][msk_WZ_pass], bins=bins, weights=WZ['weight'][msk_WZ_pass], fillcolor=ROOT.kRed - 4, label='W/Z + #gamma')
+    #pass
+
     h_bkg_nom    = c.stack(h_bkg_nom,    fillcolor=ROOT.kAzure  + 7, label="Bkg. (full)")
+    h_sum = c.getStackSum()
+    h_bkg_stripe.Add(h_WZ)
+    h_gbs       .Add(h_WZ)
     if args.inject:
-        h_sig    = c.stack(h_sig,        fillcolor=ROOT.kRed - 4,    label="Z' (%d GeV)" % args.mass)
+        h_sig    = c.stack(h_sig,        fillcolor=ROOT.kViolet - 4,    label="Z' (%d GeV)" % args.mass)
         pass
     h_bkg_stripe = c.hist (h_bkg_stripe, linecolor=ROOT.kGreen  + 1, label="Bkg. (window)")# % args.mass)
-    h_gbs        = c.hist(h_gbs,         linecolor=ROOT.kViolet + 1, label="Bkg. (GBS)")
+    h_gbs        = c.hist (h_gbs,        linecolor=ROOT.kViolet + 1, label="Bkg. (GBS)")
     
 
 
     # Draw stats. error of stacked sum
-    h_sum = h_bkg_nom.Clone('h_sum') #c.getStackSum()
     h_sum = c.hist(h_sum, fillstyle=3245, fillcolor=ROOT.kGray+2, linecolor=ROOT.kGray + 3, label='Stats. uncert.', option='E2')
     
     # Add (pseudo-) data
-    h_data = c.plot (data['m'][msk_pass], bins=bins, weights=data['weight'][msk_pass], markersize=0.8, label='Data' if args.data else 'Pseudo-data', scale=1)
+    h_data = c.plot (data['m'][msk_pass], bins=bins, weights=data['weight'][msk_pass], markersize=0.8, label='Data' if args.data else 'Pseudo-data')
 
     # Axis limits
     p1.ylim(0.8, 1.2)
@@ -269,12 +256,12 @@ def main ():
 
     # Draw error- and ratio plots
     if args.inject:
-        hr_sig  = c.ratio_plot((h_sig,       h_bkg_nom), option='HIST', offset=1)
+        hr_sig  = c.ratio_plot((h_sig,       h_sum), option='HIST', offset=1)
         pass
-    h_err   = c.ratio_plot((h_sum,       h_bkg_nom), option='E2')
-    h_ratio = c.ratio_plot((h_data,      h_bkg_nom), oob=True)
-    h_rgbs  = c.ratio_plot((h_gbs,       h_bkg_nom), linecolor=ROOT.kViolet + 1, option='HIST ][')
-    h_rgbs  = c.ratio_plot((h_bkg_stripe,h_bkg_nom), linecolor=ROOT.kGreen  + 1, option='HIST ][')
+    h_err   = c.ratio_plot((h_sum,       h_sum), option='E2')
+    h_ratio = c.ratio_plot((h_data,      h_sum), oob=True)
+    h_rgbs  = c.ratio_plot((h_gbs,       h_sum), linecolor=ROOT.kViolet + 1, option='HIST ][')
+    h_rgbs  = c.ratio_plot((h_bkg_stripe,h_sum), linecolor=ROOT.kGreen  + 1, option='HIST ][')
     
     # Add labels and text
     c.xlabel('Signal jet mass [GeV]')
