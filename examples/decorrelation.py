@@ -15,6 +15,7 @@ import sys, glob, itertools
 
 # Get ROOT to stop hogging the command-line options
 import ROOT
+ROOT.PyConfig.IgnoreCommandLineOptions = True
 
 # Scientific import(s)
 try:
@@ -28,8 +29,8 @@ except ImportError:
 
 # Local import(s)
 try:
-    from snippets.functions import loadDataFast, loadXsec, displayName, displayNameUnit # *
-    #from snippets.style import *
+    import transferfactor as tf
+    from snippets.functions import loadDataFast, loadXsec, displayName, displayNameUnit
     from rootplotting import ap
 except ImportError:
     print "WARNING: This script uses the 'snippets' package. Clone it as e.g.:"
@@ -37,20 +38,29 @@ except ImportError:
     sys.exit()
     pass
 
+# Command-line arguments parser
+import argparse
+
+parser = argparse.ArgumentParser(description='Perform decorrelation study.')
+
+parser.add_argument('--show', dest='show', action='store_const',
+                    const=True, default=False,
+                    help='Show plots (default: False)')
+parser.add_argument('--save', dest='save', action='store_const',
+                    const=True, default=False,
+                    help='Save plots (default: False)')
+
 # Main function definition.
 def main ():
 
-    show = False
-
-    # Input file paths
-    base_path = '../AnalysisTools/outputObjdef/'
-    #base_path = '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/outputObjdef/2017-04-27/'
+    # Parse command-line arguments
+    args = parser.parse_args()
 
     paths = {
-        'incl': glob.glob(base_path + 'objdef_MC_3610*.root'),
-        'W':    glob.glob(base_path + 'objdef_MC_30543*.root'),
-        'Z':    glob.glob(base_path + 'objdef_MC_30544*.root'),
-        'sig':  glob.glob(base_path + 'objdef_MC_308365.root'),
+        'incl': glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root'),
+        'W':    glob.glob(tf.config['base_path'] + 'objdef_MC_30543*.root'),
+        'Z':    glob.glob(tf.config['base_path'] + 'objdef_MC_30544*.root'),
+        'sig':  glob.glob(tf.config['base_path'] + 'objdef_MC_308365.root'),
         }
 
     # Load data
@@ -121,7 +131,7 @@ def main ():
                                  weights=data['incl']['weight'])
 
     # Draw
-    c = ap.canvas(batch=not show)
+    c = ap.canvas(batch=not args.show)
 
     c.plot(profile_before, linecolor=colours[0], markercolor=colours[0], label='Original, #tau_{21}',          option='PE', legend_option='LP')
     c.plot(profile_after,  linecolor=colours[1], markercolor=colours[1], label='Transformed, #tau_{21}^{DDT}', option='PE', legend_option='LP')
@@ -141,8 +151,8 @@ def main ():
     c.line(1.5, 0.0,  1.5, 0.05,                             linecolor=ROOT.kGray,     linestyle=1, linewidth=1)
     
     savename = 'plots/decorrelation_fit_%s_vs_%s.pdf' % ('tau21', xvar)
-    c.save(savename)
-    c.show()
+    if args.save: c.save(savename)
+    if args.show: c.show()
 
 
     # Performing pT-slicing
@@ -196,7 +206,7 @@ def main ():
         for xvar in xvars:
             yvar1, yvar2 = 'tau21', 'tau21_ungroomed'
                         
-            c = ap.canvas(num_pads=2, batch=not show)
+            c = ap.canvas(num_pads=2, batch=not args.show)
 
             # -- main pad
             for i, (col, name, prof) in enumerate(zip(colours, names, profiles['incl'][xvar][yvar1])):
@@ -227,8 +237,8 @@ def main ():
                    qualifier=qualifier)
 
             savename = 'plots/decorrelation_trimmed_untrimmed_%s_vs_%s_tree%d.pdf' % (yvar1, xvar, itreename)
-            c.save(savename)
-            c.show()
+            if args.save: c.save(savename)
+            if args.show: c.show()
             pass
 
 
@@ -238,7 +248,7 @@ def main ():
         # Loop xvars
         for xvar, yvar in itertools.product(xvars, yvars):
                
-            c = ap.canvas(batch=not show)
+            c = ap.canvas(batch=not args.show)
 
             for i, (col, name, prof) in enumerate(zip(colours, names, profiles['incl'][xvar][yvar])):
                 c.plot(prof, linecolor=col, markercolor=col, markerstyle=20, label=name, option='PE', legend_option='LP')
@@ -253,8 +263,8 @@ def main ():
                    qualifier=qualifier)
 
             savename = 'plots/decorrelation_%s_vs_%s_tree%d.pdf' % (yvar, xvar, itreename)
-            c.save(savename)
-            c.show()
+            if args.save: c.save(savename)
+            if args.show: c.show()
             pass # end: loop xvars, yvars
 
 
@@ -288,7 +298,7 @@ def main ():
                 pass
 
 
-            c = ap.canvas(batch=not show)
+            c = ap.canvas(batch=not args.show)
 
             # -- main pad
             for i, (col, name, prof) in enumerate(zip(colours, names, profiles['incl'][xvar][yvar])):
@@ -312,8 +322,8 @@ def main ():
                    qualifier=qualifier)
 
             savename = 'plots/decorrelation_inclphoton_sig_%s_vs_%s_tree%d.pdf' % (yvar, xvar, itreename)
-            c.save(savename)
-            c.show()
+            if args.save: c.save(savename)
+            if args.show: c.show()
             pass
 
         pass # end: loop treenames
