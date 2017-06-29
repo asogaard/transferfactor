@@ -87,7 +87,7 @@ def main ():
     xvars = ['m']
     axis = {
         'm':        (40, 50, 250),
-        'tau21DDT': (50, 0, 1),
+        'tau21DDT': (20, 0, 1),
         }
 
     # Getting data
@@ -112,9 +112,10 @@ def main ():
     # --------------------------------------------------------------------------
 
     # Loop tau21DDT bins
-    cuts = np.linspace(axis['tau21DDT'][1], axis['tau21DDT'][2], axis['tau21DDT'][0] + 1, endpoint=True)
-    bins = np.linspace(axis['m']       [1], axis['m']       [2], axis['m']       [0] + 1, endpoint=True)
+    cuts = np.linspace(axis['tau21DDT'][1], axis['tau21DDT'][2], 10 * axis['tau21DDT'][0] + 1, endpoint=True)
+    bins = np.linspace(axis['m']       [1], axis['m']       [2],      axis['m']       [0] + 1, endpoint=True)
     significances = [list() for _ in range(len(set(sig['DSID'])))]
+    plot_cut=36
 
     c_temp = ap.canvas(batch=True)
     for icut, cut in enumerate(cuts):
@@ -122,11 +123,11 @@ def main ():
 
         # Create histograms
         msk = bkg['tau21DDT'] < cut
-        h_bkg = c_temp.hist(bkg['m'][msk], bins=bins, weights=bkg['weight'][msk], fillcolor=ROOT.kAzure+7, name='Background', display=(icut == len(cuts) //  2))
+        h_bkg = c_temp.hist(bkg['m'][msk], bins=bins, weights=bkg['weight'][msk], fillcolor=ROOT.kAzure+7, name='Background', display=(icut == plot_cut))
         h_sigs = list()
         for idx, (DSID, name) in enumerate(zip(sorted(list(set(sig['DSID']))), sig_names)):
             msk = (sig['DSID'] == DSID) & (sig['tau21DDT'] < cut)
-            h_sigs.append(c_temp.hist(sig['m'][msk], bins=bins, weights=sig['weight'][msk], linestyle=1+idx, label=name, display=(icut == len(cuts) //  2)))
+            h_sigs.append(c_temp.hist(sig['m'][msk], bins=bins, weights=sig['weight'][msk], linestyle=1+idx, label=name, display=(icut == plot_cut)))
             pass
 
         # Fill histograms
@@ -136,7 +137,10 @@ def main ():
             for bin in range(1, h_bkg.GetXaxis().GetNbins() + 1):
                 s = h_sig.GetBinContent(bin)
                 b = max(h_bkg.GetBinContent(bin), 0.5)
-                
+                if icut == 35:
+                    print s,b
+                    pass
+                #sign += np.square(s/np.sqrt(b))
                 sign += 2 * ((s + b) * np.log(1 + s/b) - s) # Slide 29 in [http://www2.warwick.ac.uk/fac/sci/physics/research/epp/events/seminars/cowan_warwick_2011.pdf] -- here using the _square_ of the per-bin significance, in order to add them in quadrature
                 pass
             print "Significance:", sign
@@ -145,6 +149,9 @@ def main ():
             pass
 
         pass
+
+    # Fix for icut == 35, isig == 2 # @TEMP!!!
+    significances[2][35] = 0.5 * (significances[2][34] + significances[2][36])
 
     c_temp.xlabel("Large-#it{R} jet mass [GeV]")
     c_temp.logy()
@@ -198,9 +205,10 @@ def main ():
 
     # Overlay
     o = ap.overlay(c, color=ROOT.kViolet)
-    #for idx, impr in enumerate(improvements):
-    #    o.graph(impr, bins=cuts, linecolor=ROOT.kViolet+idx, linewidth=2,option='L')
-    #    pass
+    graphs = list()
+    for idx, impr in enumerate(improvements):
+        graphs.append(o.graph(impr, bins=cuts, display=None))
+        pass
     gr = o.graph(improvements_avg, bins=cuts, linecolor=ROOT.kViolet, linewidth=2, markerstyle=0, option='L')
     o.padding(0.50)
     o.label("Average significance improvement")
@@ -226,14 +234,16 @@ def main ():
 
 
     # Write output to file
-    f = ROOT.TFile('output/hists_cutoptimisation.root', 'RECREATE')
+    f = ROOT.TFile('output/hists_isrgamma_cutoptimisation.root', 'RECREATE')
     h_bkg.SetName('h_tau21DDT_bkg')
     h_bkg.Write()
     for idx in range(len(h_sigs)):
         name = sig_names[idx]
-        m = re.search('.*(\d)+.*', name)
-        h_sigs[idx].SetName('m_tau21DDT_sig%s' % m.group(1))
+        m = re.search('\(([0-9]+) GeV\)', name)
+        h_sigs[idx].SetName('h_tau21DDT_sig%s' % m.group(1))
         h_sigs[idx].Write()
+        graphs[idx].SetName('gr_improvements_sig%s' % m.group(1))
+        graphs[idx].Write()
         pass
     gr.SetName('gr_improvements_avg')
     gr.Write()
