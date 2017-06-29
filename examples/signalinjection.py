@@ -269,7 +269,7 @@ def main ():
                             fillcolor=ROOT.kAzure + 7, 
                             label='Background pred.')
             h_sig = c.stack(h_sig,
-                            fillcolor=ROOT.kOrange + 7,
+                            fillcolor=ROOT.kRed - 4,
                             label="Z' (#mu = %s)" % ("%.0f" % mu if prefit else "%.2f #pm %.2f" % (mu, bestfit_mu[1])))
             
             h_sum = h_bkg
@@ -288,7 +288,7 @@ def main ():
                             label='Pseudo-data')
 
             # -- Histograms: Ratio pad
-            c.ratio_plot((h_sig,      h_sum), option='HIST', offset=1, fillcolor=ROOT.kOrange + 7)
+            c.ratio_plot((h_sig,      h_sum), option='HIST', offset=1)
             c.ratio_plot((h_sum,      h_sum), option='E2')
             c.ratio_plot((h_bkg_up,   h_sum), option='HIST')
             c.ratio_plot((h_bkg_down, h_sum), option='HIST')
