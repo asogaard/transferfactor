@@ -164,7 +164,7 @@ def main ():
         
         h_sum = h_bkg
         h_sum = c.hist(h_sum, 
-                       fillstyle=3245, fillcolor=ROOT.kGray + 3, option='E2',
+                       fillstyle=3245, fillcolor=ROOT.kGray + 2, linecolor=ROOT.kGray + 3, option='E2',
                        label='Stat. uncert.')
 
         h_bkg_up   = c.hist(h_bkg_up,
