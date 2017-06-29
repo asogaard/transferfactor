@@ -1,5 +1,5 @@
 # transferfactor
-Python package for performing background estimation using 2D transfer factor (TF) method
+Python package for performing background estimation using 2D transfer factor (TF) method, and for producing plots for the ATLAS boosted di-jet + ISR analysis.
 
 ## Quick start
 
