@@ -21,6 +21,7 @@ try:
     # Numpy
     import numpy as np
     from root_numpy import *
+    import matplotlib.pyplot as plt
 except ImportError:
     print "WARNING: One or more scientific python packages were not found. If you're in lxplus, try running:"
     print "         $ source /cvmfs/sft.cern.ch/lcg/views/LCG_88/x86_64-slc6-gcc49-opt/setup.sh"
@@ -32,6 +33,7 @@ try:
     import transferfactor as tf
     from rootplotting import ap
     from rootplotting.tools import *
+    from rootplotting.style import *
 except ImportError:
     print "WARNING: This script uses the 'transferfactor' and 'rootplotting' packages. Clone them as e.g.:"
     print "         $ git clone git@github.com:asogaard/transferfactor.git"
@@ -69,9 +71,126 @@ def main ():
         warning("No files found.")
         return
 
-    colours = [ROOT.kViolet + 7, ROOT.kAzure + 7, ROOT.kTeal, ROOT.kSpring - 2, ROOT.kOrange - 3, ROOT.kPink]
     masses = np.array([100, 130, 160, 190, 220], dtype=float)
     DSIDs  = [int(re.search('objdef_MC_(\d{6})\.root', f).group(1)) for f in files]
+
+    # Plot acceptance, and acc x eff, with uncertainties versus signal mass point
+    # --------------------------------------------------------------------------
+
+    acceptance                = dict()
+    acceptanceTimesEfficiency = dict()
+
+    # Number of events relative to which the acceptance is computed
+    base = {
+        308363: 50000,
+        308364: 48000,
+        308365: 50000,
+        308366: 50000,
+        308367: 48000,
+        }
+
+    categories = dict()
+
+    # Loop signal mass points
+    for DSID, filename in zip(DSIDs, files):
+        f = ROOT.TFile(filename, 'READ')
+
+        # Get systematic variation categories
+        f.cd("BoostedJet+ISRgamma")
+        categories[DSID] = [e.GetName() for e in ROOT.gDirectory.GetListOfKeys()]
+        
+        acceptance               [DSID] = dict()
+        acceptanceTimesEfficiency[DSID] = dict()
+
+        # Loop categories
+        for cat in categories[DSID]:
+            precut  = f.Get('BoostedJet+ISRgamma/{cat}/EventSelection/Pass/Jet_tau21DDT/Precut' .format(cat=cat))
+            postcut = f.Get('BoostedJet+ISRgamma/{cat}/EventSelection/Pass/Jet_tau21DDT/Postcut'.format(cat=cat))
+
+            acceptance               [DSID][cat] = precut .GetEntries() / float(base[DSID])
+            acceptanceTimesEfficiency[DSID][cat] = postcut.GetEntries() / float(base[DSID])
+            pass
+        pass
+
+    acceptance_nominal                = {DSID: acceptance               [DSID]['Nominal'] for DSID in DSIDs}
+    acceptanceTimesEfficiency_nominal = {DSID: acceptanceTimesEfficiency[DSID]['Nominal'] for DSID in DSIDs}
+
+    acceptance_syst = dict()
+    acceptance_stat = dict()
+    acceptanceTimesEfficiency_syst = dict()
+    acceptanceTimesEfficiency_stat = dict()
+    for DSID in DSIDs:
+
+        # Systematic variation groups
+        groups = set(categories[DSID]) - set(['Nominal'])
+        groups = sorted(list(set([grp.replace('__1up', '').replace('__1down', '') for grp in list(groups)])))
+
+        # Acceptance
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - 
+        f = acceptance_nominal[DSID]
+        stat = 0 # np.sqrt( f * (1. - f) / base[DSID] ) # Only systematics
+
+        syst = 0.
+        nom = acceptance_nominal[DSID]
+        for grp in groups:
+            up   = acceptance[DSID][grp + '__1up']
+            down = acceptance[DSID][grp + '__1down']
+            diff = max(abs(up - nom), abs(down - nom))
+            syst += np.square(diff)
+            pass
+        syst = np.sqrt(syst)
+
+        acceptance_stat[DSID] = stat
+        acceptance_syst[DSID] = syst
+
+        # Acceptance x efficiency
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - 
+        f = acceptanceTimesEfficiency_nominal[DSID]
+        stat = 0 # np.sqrt( f * (1. - f) / base[DSID] ) # Only systematics!
+
+        syst = 0.
+        nom = acceptanceTimesEfficiency_nominal[DSID]
+        for grp in groups:
+            up   = acceptanceTimesEfficiency[DSID][grp + '__1up']
+            down = acceptanceTimesEfficiency[DSID][grp + '__1down']
+            diff = max(abs(up - nom), abs(down - nom))
+            syst += np.square(diff)
+            pass
+        syst = np.sqrt(syst)
+
+        acceptanceTimesEfficiency_stat[DSID] = stat
+        acceptanceTimesEfficiency_syst[DSID] = syst        
+        pass
+    
+    # Get total uncertainty
+    acceptance_uncert                = np.array([np.sqrt( np.square(acceptance_stat               [DSID]) + np.square(acceptance_syst               [DSID])) for DSID in DSIDs], dtype=float)
+    acceptanceTimesEfficiency_uncert = np.array([np.sqrt( np.square(acceptanceTimesEfficiency_stat[DSID]) + np.square(acceptanceTimesEfficiency_syst[DSID])) for DSID in DSIDs], dtype=float)
+
+    # Produce acceptance graphs with errors
+    graph_acceptance                = ROOT.TGraphErrors(len(DSIDs), 
+                                                        masses, 
+                                                        np.array([acceptance_nominal               [DSID] for DSID in DSIDs], dtype=float),
+                                                        np.zeros_like(masses),
+                                                        acceptance_uncert)
+
+    graph_acceptanceTimesEfficiency = ROOT.TGraphErrors(len(DSIDs),
+                                                        masses,
+                                                        np.array([acceptanceTimesEfficiency_nominal[DSID] for DSID in DSIDs], dtype=float),
+                                                        np.zeros_like(masses),
+                                                        acceptanceTimesEfficiency_uncert)
+
+    # Output histograms for harmonised plotting
+    if args.save:
+        f = ROOT.TFile('output/hists_isrgamma_acceptance.root', 'RECREATE')
+        graph_acceptance.SetName('acc')
+        graph_acceptance.Write()
+        graph_acceptanceTimesEfficiency.SetName('acceff')
+        graph_acceptanceTimesEfficiency.Write()
+        f.Write()
+        f.Close()
+        pass
+
+    return
 
 
     # Plot jet-level acceptance versus signal mass point
@@ -104,7 +223,7 @@ def main ():
         pass
 
     c = ap.canvas(batch=not args.show)
-    names = ["Pre-seleciton", "|#eta| < 2.0", "p_{T} > 200 GeV", "#Delta(#phi,J) > #pi/2", "p_{T} > 2 #times m", "#rho^{DDT} > 1.5"]
+    names = ["Pre-seleciton", "|#eta| < 2.0", "p_{T} > 200 GeV", "|#Delta#phi(#gamma,J)| > #pi/2", "p_{T} > 2 #times m", "#rho^{DDT} > 1.5"]
     for idx, (label, name) in enumerate(zip(labels, names)):
         acceptance_values = np.array([acceptances[DSID][idx] for DSID in DSIDs])
         acc = ROOT.TGraphErrors(len(DSIDs), masses, acceptance_values)
@@ -163,7 +282,26 @@ def main ():
         acceptances.append(accepted_events / base_events)
         pass
 
-    # Plot: Event-levle ecceptance
+    print "Mu scaling factors for full MC:"
+    nsb = acceptances[-1] / acceptances[-2]
+    for (mass, factor) in zip(masses, nsb):
+        print "%3d GeV: %.3f" % (mass, factor)
+        pass
+
+    interpolation_masses = np.linspace(100, 220, (220 - 100) / 5 + 1, endpoint=True)
+    nsb_interpolated = np.exp(np.interp(interpolation_masses, masses, np.log(nsb)))
+    print "Mu scaling factors, logarithmically interpolated:"
+    for m,n in zip(interpolation_masses, nsb_interpolated):
+        print "%d GeV: %.3f" % (m,n)
+        pass
+
+    acc_interpolated = np.interp(interpolation_masses, masses, acceptances[-2])
+    print "Signal acceptance up until tau21DDT cut, linearly interpolated:"
+    for m,a in zip(interpolation_masses, acc_interpolated):
+        print "%d GeV: %.3f" % (m,a)
+        pass
+
+    # Plot: Event-level ecceptance
     c = ap.canvas(batch=not args.show)
     names = ["Pre-selection", "= 1 #gamma", "#geq 1 jet", "#tau_{21}^{DDT} < 0.5"]
     for icut, (name, acceptance) in enumerate(zip(names,acceptances)):
