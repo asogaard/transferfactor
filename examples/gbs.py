@@ -52,6 +52,9 @@ parser.add_argument('--show', dest='show', action='store_const',
 parser.add_argument('--save', dest='save', action='store_const',
                     const=True, default=False,
                     help='Save plots (default: False)')
+parser.add_argument('--data', dest='data', action='store_const',
+                    const=True, default=False,
+                    help='Use data (default: False/MC)')
 parser.add_argument('--subtractWZdata', dest='subtractWZdata', action='store_const',
                     const=True, default=False,
                     help='Subtract estimated W/Z fail component from data (default: False)')
@@ -66,12 +69,24 @@ def main ():
     # Parse command-line arguments
     args = parser.parse_args()
 
+    # Check(s)
+    if (not args.data) and args.subtractWZMC:
+        warning("Requesting to subtract W/Z MC from MC background which contains no contamination. Exiting.")
+        return
+
+    if (not args.data) and args.subtractWZdata:
+        warning("Requesting to subtract W/Z data from MC background which contains no contamination. Exiting.")
+        return
 
     # Setup.
-    # – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – – 
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
     # Load data
-    files_data = glob.glob(tf.config['base_path'] + 'objdef_data_*.root')
+    if args.data:
+        files_data = glob.glob(tf.config['base_path'] + 'objdef_data_*.root')
+    else:
+        files_data = glob.glob(tf.config['base_path'] + 'objdef_MC_3610*.root')
+        pass
     files_WZ   = glob.glob(tf.config['base_path'] + 'objdef_MC_30543*.root') + \
                  glob.glob(tf.config['base_path'] + 'objdef_MC_30544*.root')
     
@@ -92,7 +107,14 @@ def main ():
     data = append_fields(data, 'DSID', np.zeros((data.size,)), dtypes=int)
     for idx, id in enumerate(info_data['id']):
         msk = (data['id'] == id) # Get mask of all 'data' entries with same id, i.e. from same file
-        DSID = info_data['DSID'][idx]  # Get DSID for this file
+        tmp_DSID = info_data['DSID'][idx]  # Get DSID for this file
+        if not args.data:
+            data['weight'][msk] *= xsec[tmp_DSID] # Scale by cross section x filter eff. for this DSID
+            data['DSID']  [msk] = tmp_DSID        # Store DSID
+            pass
+        pass
+    if not args.data:
+        data['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
         pass
     
     WZ = append_fields(WZ, 'DSID', np.zeros((WZ.size,)), dtypes=int)
@@ -119,10 +141,10 @@ def main ():
     msk_WZ_fail = ~msk_WZ_pass
 
     # Transfer factor calculator instance
-    calc = tf.calculator(data=data, config=tf.config, subtract=WZ if args.subtractWZMC else None)
+    calc = tf.calculator(data=data, config=tf.config, subtract=WZ if (args.subtractWZMC and args.data) else None)
 
     # GBS mass bins
-    masses = np.linspace(100, 250, 30 + 1, endpoint=True) # GBS mass bins
+    masses = np.linspace(100, 270, 34 + 1, endpoint=True) # GBS mass bins
 
     # Weight and counter arrays
     weights_bkg_nom  = np.zeros((np.sum(msk_fail),), dtype=float)
@@ -143,7 +165,7 @@ def main ():
         calc.mass = mass
         calc.fullfit()
 
-        if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/tf_gbs_%dGeV_' % mass, MC=False)
+        if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/tf_gbs_%s_%dGeV_' % ('data' if args.data else 'MC', mass), MC=not args.data)
 
         # Get TF weights
         w_nom,    w_up,    w_down    = calc.fullweights(data[msk_fail])
@@ -181,10 +203,10 @@ def main ():
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     check_make_dir('output')
 
-    DSID = 400000
+    DSID = 400000 if args.data else 400001
 
     # Write TF-scaled failing data to file
-    output = ROOT.TFile('output/objdef_GBS_{DSID}.root'.format(DSID=DSID), 'RECREATE')
+    output = ROOT.TFile('output/objdef_GBS{MC}_{DSID}.root'.format(DSID=DSID, MC='' if args.data else 'MC'), 'RECREATE')
 
     for shift, w, w_WZ in zip([0,               1,             -1],
                               [weights_bkg_nom, weights_bkg_up, weights_bkg_down],
@@ -196,7 +218,7 @@ def main ():
         # -- Prepare mass- and weight vectors
         vector_m = data['m']     [msk_fail]
         vector_w = data['weight'][msk_fail] * w
-        if args.subtractWZdata:
+        if args.subtractWZdata and args.data:
             if WZ is not None and WZ.size > 0:
                 print "  Subtracting TF-scaled W/Z MC from background estimate"
                 vector_m = np.concatenate((vector_m,   WZ['m']     [msk_WZ_fail]))
@@ -243,7 +265,7 @@ def main ():
     # -- Turn numpy arrays into lists, in order to make them JSON serializable
     cfg = make_serializable(tf.config)
 
-    json.dump([cfg, vars(args)], open('logs/gbs_config_%d.log' % DSID, 'w'))
+    json.dump([cfg, vars(args)], open('logs/gbs_config_%s_%d.log' % ('data' if args.data else 'MC', DSID), 'w'))
 
     return
 
