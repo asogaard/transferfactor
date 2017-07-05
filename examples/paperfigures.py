@@ -90,16 +90,16 @@ def main ():
         pads = c.pads()
         
         # -- main pad
-        c.stack(histograms['QCD'],  fillcolor=compcolours['QCD'],  label='Background est.')
-        c.stack(histograms['ZHad'], fillcolor=compcolours['ZHad'], label='Z + %s' % ('jets' if isrjet else '#gamma'))
-        c.stack(histograms['WHad'], fillcolor=compcolours['WHad'], label='W + %s' % ('jets' if isrjet else '#gamma'))
+        h_mc   = c.stack(histograms['QCD'],  fillcolor=compcolours['QCD'],  label='Background est.')
+        h_zhad = c.stack(histograms['ZHad'], fillcolor=compcolours['ZHad'], label='Z + %s' % ('jets' if isrjet else '#gamma'))
+        h_whad = c.stack(histograms['WHad'], fillcolor=compcolours['WHad'], label='W + %s' % ('jets' if isrjet else '#gamma'))
         h_sum = c.hist(histograms['QCD'], fillstyle=3245, fillcolor=ROOT.kGray + 3, option='E2',
                        label='Stat. uncert.')
         
         h_bkg_up   = c.hist(histograms['QCD_up'],   linestyle=2, linecolor=compcolours['syst'], label='Syst. uncert.')
         h_bkg_down = c.hist(histograms['QCD_down'], linestyle=2, linecolor=compcolours['syst'])
         
-        c.plot (histograms['data'], label='Data')
+        h_data = c.plot (histograms['data'], label='Data')
         
         # -- diff pad
         pads[1].hist(histograms['WZHad'], fillcolor=compcolours['WHad'], option='HIST')
@@ -108,19 +108,40 @@ def main ():
         c.diff_plot((h_bkg_down, histograms['QCD']), option='HIST')
         c.diff_plot((histograms['data'], histograms['QCD']))
         
+        # -- statistical test
+        h_mc.Add(h_zhad)
+        h_mc.Add(h_whad)
+        for bin in range(1, h_mc.GetXaxis().GetNbins()):
+            stat = h_mc.GetBinError(bin)
+
+            nom  = h_sum     .GetBinContent(bin)
+            up   = h_bkg_up  .GetBinContent(bin)
+            down = h_bkg_down.GetBinContent(bin)
+            syst = max(abs(up-nom), abs(down-nom))
+
+            h_mc.SetBinError(bin, np.sqrt( np.square(stat) + np.square(syst) ))
+            pass
+        chi2 = h_data.Chi2Test      (h_mc, "UW CHI2 P")
+        KS   = h_data.KolmogorovTest(h_mc)
+        ndf = h_mc.GetXaxis().GetNbins() - 1
+
         # -- decorations
         c.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",
                 "%s channel" % ('Jet' if isrjet else 'Photon')],
                qualifier="Internal")
         c.xlabel('Large-#it{R} jet mass [GeV]')
         c.ylabel('Events / 2 GeV')
-        c.padding(0.37)
+        c.padding(0.45) # (0.37)
         if isrjet: pads[1].ylim(-1000, 5000)
         else:      pads[1].ylim( -140,  700)
         pads[1].ylabel('Data - background est.')
         pads[1].yline(0)
         c.region("SR", 0.8 * 85., 1.2 * 85.)
         c.legend(ymax=0.875, sort=True)
+        
+        stats_string = "KS prob. = %.3f  |  #chi^{2}/N_{dof} (prob.) = %.1f/%d (%.3f)" % (KS, chi2, ndf, ROOT.TMath.Prob(chi2, ndf))
+        #c.latex(stats_string, 0.95 , 0.96, NDC=True, align=31, textsize=16)
+
         if args.save: c.save('plots/paperplot_wz_%s.pdf' % ('jet' if isrjet else 'gamma'))
         if args.show: c.show()
         pass
@@ -183,8 +204,8 @@ def main ():
         pads = c.pads()
         
         # -- main pad
-        c.stack(histograms['WZHad'], fillcolor=compcolours['WHad'], label='W/Z + %s' % ('jets' if isrjet else '#gamma'))
-        c.stack(histograms['QCD'],   fillcolor=compcolours['QCD'],  label='Background est.')
+        h_mc = c.stack(histograms['WZHad'], fillcolor=compcolours['WHad'], label='W/Z + %s' % ('jets' if isrjet else '#gamma'))
+        h_qcd = c.stack(histograms['QCD'],   fillcolor=compcolours['QCD'],  label='Background est.')
           
         h_sum = c.getStackSum()
         h_sum = c.hist(h_sum, fillstyle=3245, fillcolor=ROOT.kGray + 3, option='E2',
@@ -198,7 +219,7 @@ def main ():
             c.hist(histograms['sig'], linestyle=1, linecolor=ROOT.kViolet+2, label="Z' (%d GeV)" % mass)
             pass
         
-        c.plot (histograms['data'], label='Data')
+        h_data = c.plot (histograms['data'], label='Data')
         
         # -- diff pad
         if isrjet: pads[1].ylim(0.95, 1.05)
@@ -209,6 +230,21 @@ def main ():
         c.ratio_plot((h_sum,      h_sum), option='E2')
         c.ratio_plot((histograms['data'], h_sum), oob=True)
         
+        # -- statistical test
+        h_mc.Add(h_qcd)
+        for bin in range(1, h_mc.GetXaxis().GetNbins()):
+            nom  = h_mc      .GetBinContent(bin)
+            up   = h_bkg_up  .GetBinContent(bin)
+            down = h_bkg_down.GetBinContent(bin)
+            statPlusSyst = max(abs(up-nom), abs(down-nom))
+
+            # h_bkg_{up,down} are stats. oplus syst.
+            h_mc.SetBinError(bin, statPlusSyst)
+            pass
+        chi2 = h_data.Chi2Test      (h_mc, "UW CHI2 P")
+        KS   = h_data.KolmogorovTest(h_mc)
+        ndf  = h_mc.GetXaxis().GetNbins() - 1
+
         # -- decorations
         c.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",
                 "%s channel" % ('Jet' if isrjet else 'Photon')],
@@ -232,6 +268,10 @@ def main ():
         c.region("SR", 0.8 * mass, 1.2 * mass) #, offset=(0.14 if (mass == 150 and not isrjet) else 0.07))
         c.legend(sort=True) # ymax=0.87
         c.log(log)
+
+        stats_string = "KS prob. = %.3f  |  #chi^{2}/N_{dof} (prob.) = %.1f/%d (%.3f)" % (KS, chi2, ndf, ROOT.TMath.Prob(chi2, ndf))
+        #c.latex(stats_string, 0.95 , 0.955, NDC=True, align=31, textsize=16)
+
         if args.save: c.save('plots/paperplot_%s_%dGeV%s.pdf' % ('jet' if isrjet else 'gamma', mass, '_log' if log else ''))
         if args.show: c.show()
         pass
@@ -308,7 +348,7 @@ def main ():
                 "%s channel" % ('Jet' if isrjet else 'Photon')],
                qualifier="Simulation Internal")
         c.xlabel("Large-#it{R} jet #tau_{21}^{DDT}")
-        c.ylabel("Events (a.u.)")
+        c.ylabel("Events (normalised to unit)")
         o.label("Relative improvement in significance")
         c.legend(width=0.26)
         
@@ -424,7 +464,7 @@ def main ():
 
         # Decorations
         c.xlabel('Signal jet #tau_{21}^{DDT}')
-        c.ylabel('Jets (a.u.)')
+        c.ylabel('Jets (normalised to unit)')
         c.text(["#sqrt{s} = 13 TeV", "%s selection" % ('Jet' if isrjet else 'Photon')], qualifier="Simulation Internal")
         c.padding(0.50)
 
