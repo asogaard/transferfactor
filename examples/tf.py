@@ -203,6 +203,11 @@ def main ():
         if signal is not None:
             print "  -- Computing signal weights"
             w_sig_nom, w_sig_up, w_sig_down  = calc.fullweights(signal[msk_sig_fail])
+
+            w_sig_pass, _, _                 = calc.fullweights(signal[msk_sig_pass])
+
+            print "Scale factors for signal strength:"
+            print "  pass / (pass + fail) = %.3e / (%.3e + %.3e) = %.4f"  % (np.sum(w_sig_pass), np.sum(w_sig_pass), np.sum(w_sig_nom), np.sum(w_sig_pass) / (np.sum(w_sig_nom) + np.sum(w_sig_pass)))
             pass
         if WZ is not None:
             print "  -- Computing W/Z weights"
@@ -252,7 +257,9 @@ def main ():
     check_make_dir('output')
     
     # Write TF-scaled failing data to file
-    output = ROOT.TFile('output/objdef_TF_{DSID:6d}.root'.format(DSID=DSID), 'RECREATE')
+    if args.save:
+        output = ROOT.TFile('output/objdef_TF_{DSID:6d}.root'.format(DSID=DSID), 'RECREATE')
+        pass
     
     for shift, w, w_WZ in zip([0,        1,       -1], 
                               [w_nom,    w_up,    w_down], 
@@ -287,31 +294,36 @@ def main ():
                           dtype = [('DSID', np.uint32),
                                    ('isMC', np.bool_)])
         
-        # Mass and weight branch
-        print "  Writing arrays to file: %s" % var_name
-        treename1 = tf.config['tree'].replace('NumLargeRadiusJets', 'Jet_tau21DDT').replace('Nominal', var_name)
-        make_directories('/'.join(treename1.split('/')[:-1]), fromDir=output)
-        tree1 = ROOT.TTree(treename1.split('/')[-1], "")
-        array2tree(array1, tree=tree1)
-        
-        # outputTree
-        treename2 = tf.config['outputtree'].replace('Nominal', var_name)
-        make_directories('/'.join(treename2.split('/')[:-1]), fromDir=output)
-        tree2 = ROOT.TTree(treename2.split('/')[-1], "")
-        array2tree(array2, tree=tree2)
-
-        output.Write()        
+        if args.save:
+            # Mass and weight branch
+            print "  Writing arrays to file: %s" % var_name
+            treename1 = tf.config['tree'].replace('NumLargeRadiusJets', 'Jet_tau21DDT').replace('Nominal', var_name)
+            make_directories('/'.join(treename1.split('/')[:-1]), fromDir=output)
+            tree1 = ROOT.TTree(treename1.split('/')[-1], "")
+            array2tree(array1, tree=tree1)
+            
+            # outputTree
+            treename2 = tf.config['outputtree'].replace('Nominal', var_name)
+            make_directories('/'.join(treename2.split('/')[:-1]), fromDir=output)
+            tree2 = ROOT.TTree(treename2.split('/')[-1], "")
+            array2tree(array2, tree=tree2)
+            
+            output.Write()        
+            pass
         pass
 
-    output.Close()
+    if args.save:
+        output.Close()
+        pass
         
 
     # Write TF-scaled failing signal MC to file
     if signal is not None:
-        output = ROOT.TFile('output/objdef_TF_{DSID:6d}_signalfail.root'.format(DSID=DSID), 'RECREATE')
+        if args.save:
+            output = ROOT.TFile('output/objdef_TF_{DSID:6d}_signalfail.root'.format(DSID=DSID), 'RECREATE')
+            pass
         
         for shift, w_sig in zip([0, 1, -1], [w_sig_nom, w_sig_up, w_sig_down]):
-            
             # -- Get branch name for current variation
             var_name = 'Nominal' if shift == 0 else ('TF_UP' if shift == 1 else 'TF_DOWN')
             
@@ -331,23 +343,27 @@ def main ():
                               dtype = [('DSID', np.uint32),
                                        ('isMC', np.bool_)])
             
-            # Mass and weight branch
-            print "  Writing arrays to file: %s" % var_name
-            treename1 = tf.config['tree'].replace('NumLargeRadiusJets', 'Jet_tau21DDT').replace('Nominal', var_name)
-            make_directories('/'.join(treename1.split('/')[:-1]), fromDir=output)
-            tree1 = ROOT.TTree(treename1.split('/')[-1], "")
-            array2tree(array1, tree=tree1)
-            
-            # outputTree
-            treename2 = tf.config['outputtree'].replace('Nominal', var_name)
-            make_directories('/'.join(treename2.split('/')[:-1]), fromDir=output)
-            tree2 = ROOT.TTree(treename2.split('/')[-1], "")
-            array2tree(array2, tree=tree2)
-            
-            output.Write()        
+            if args.save:
+                # Mass and weight branch
+                print "  Writing arrays to file: %s" % var_name
+                treename1 = tf.config['tree'].replace('NumLargeRadiusJets', 'Jet_tau21DDT').replace('Nominal', var_name)
+                make_directories('/'.join(treename1.split('/')[:-1]), fromDir=output)
+                tree1 = ROOT.TTree(treename1.split('/')[-1], "")
+                array2tree(array1, tree=tree1)
+                
+                # outputTree
+                treename2 = tf.config['outputtree'].replace('Nominal', var_name)
+                make_directories('/'.join(treename2.split('/')[:-1]), fromDir=output)
+                tree2 = ROOT.TTree(treename2.split('/')[-1], "")
+                array2tree(array2, tree=tree2)
+                
+                output.Write()        
+                pass
             pass
 
-        output.Close()
+        if args.save:
+            output.Close()
+            pass
         pass
         
     # Save configuration
