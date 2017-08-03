@@ -71,7 +71,8 @@ def main ():
     if not args.isrjet:
         files = glob.glob(tf.config['base_path'] + 'objdef_MC_30836*.root')
     else:
-        files = glob.glob('/afs/cern.ch/user/l/lkaplan/public/forAndreas/signals/sig_*.root')
+        #files = glob.glob('/afs/cern.ch/user/l/lkaplan/public/forAndreas/signals/sig_*.root')
+        files = glob.glob('/afs/cern.ch/user/l/lkaplan/public/forAndreas/signals_fatjetunc/sig_*.root')
         pass
 
     if len(files) == 0:
@@ -214,8 +215,8 @@ def main ():
     interpolationEvents    =        np.interp(interpolationMassPoints, massPoints, events).astype(int)   
     """ @TEMP: END """
 
-    for i, (n, integral, mass) in enumerate(zip(interpolationEvents, interpolationIntegrals, interpolationMassPoints)):
-        #for i, mass in enumerate(interpolationMassPoints):
+    #for i, (n, integral, mass) in enumerate(zip(interpolationEvents, interpolationIntegrals, interpolationMassPoints)):
+    for i, mass in enumerate(interpolationMassPoints):
         print "=" * 80
         mZ.setVal(mass)
         mZ.Print()
@@ -283,7 +284,8 @@ def main ():
         # -- Interpolate linearly between event counts
         interpolationEvents    =        np.interp(interpolationMassPoints, massPoints, events).astype(int)
         
-        for n, integral, mass in zip(interpolationEvents, interpolationIntegrals, interpolationMassPoints):
+        mult = 100
+        for n, integral, mass in zip(mult * interpolationEvents, interpolationIntegrals, interpolationMassPoints):
             
             # Generate mass- and weight dataset for interpolated mass point
             weight = integral / float(n)
@@ -304,7 +306,10 @@ def main ():
             else:
                 filename = 'sig_%d.root' % mass
                 pass
-            output = ROOT.TFile('output/' + filename, 'RECREATE')
+            outputdir = '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/StatsInputs/2017-07-19/'
+            #output = ROOT.TFile('output/' + filename, 'RECREATE')
+            output = ROOT.TFile(outputdir + filename, 'RECREATE')
+
             print "Writing %d events to file '%s'" % (n, output.GetName())
             ROOT.TH1.AddDirectory(0)
             
