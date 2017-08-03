@@ -10,10 +10,11 @@ WZ_SEARCH=false
 GBS=false
 GLOBALBACKGROUNDPLOTS=false
 DATA_DISTRIBUTIONS=false
-INTERPOLATION=false
+INTERPOLATION=true
 ACCEPTANCE=false
-CUTOPTIMISATION=true
+CUTOPTIMISATION=false
 PAPERFIGS=false
+VALIDATION=false
 
 
 # Substructure de-correlation
@@ -260,7 +261,7 @@ if $INTERPOLATION; then
 
     python examples/interpolation.py          --save > logs/log_interpolation_isrgamma.txt &
     python examples/interpolation.py --isrjet --save > logs/log_interpolation_isrjet.txt   &
-    wait
+    #wait
 fi
 
 
@@ -294,4 +295,38 @@ if $PAPERFIGS; then
 
     python examples/paperfigures.py --save > logs/log_paperfigures.txt &
     wait
+fi
+
+
+# Transfer factor fit validation
+# ------------------------------------------------------------------------------
+
+if $VALIDATION; then
+    echo "RUNNING TF VALIDATION"
+
+    python examples/validation.py --N 10 --save > logs/log_validation.txt &
+
+
+    #python examples/validation.py --mass  85 --N 10 --save > logs/log_validation_85GeV.txt &
+    #wait 
+
+    #python examples/validation.py --mass 100 --N 10 --save > logs/log_validation_100GeV.txt &
+    #python examples/validation.py --mass 110 --N 10 --save > logs/log_validation_110GeV.txt &
+    #python examples/validation.py --mass 120 --N 10 --save > logs/log_validation_120GeV.txt &
+    #python examples/validation.py --mass 130 --N 10 --save > logs/log_validation_130GeV.txt &
+    #python examples/validation.py --mass 140 --N 10 --save > logs/log_validation_140GeV.txt &
+    #python examples/validation.py --mass 150 --N 10 --save > logs/log_validation_150GeV.txt &
+    #python examples/validation.py --mass 160 --N 10 --save > logs/log_validation_160GeV.txt &
+    #python examples/validation.py --mass 170 --N 10 --save > logs/log_validation_170GeV.txt &
+    #wait
+
+    #python examples/validation.py --mass 180 --N 10 --save > logs/log_validation_180GeV.txt &
+    #python examples/validation.py --mass 190 --N 10 --save > logs/log_validation_190GeV.txt &
+    #python examples/validation.py --mass 200 --N 10 --save > logs/log_validation_200GeV.txt &
+    #python examples/validation.py --mass 210 --N 10 --save > logs/log_validation_210GeV.txt &
+    #python examples/validation.py --mass 220 --N 10 --save > logs/log_validation_220GeV.txt &
+    #python examples/validation.py --mass 230 --N 10 --save > logs/log_validation_230GeV.txt &
+    #python examples/validation.py --mass 240 --N 10 --save > logs/log_validation_240GeV.txt &
+    #python examples/validation.py --mass 250 --N 10 --save > logs/log_validation_250GeV.txt &
+    #wait
 fi
