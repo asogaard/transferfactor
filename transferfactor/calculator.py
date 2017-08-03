@@ -10,6 +10,7 @@
 
 # Basic import(s)
 import sys
+import itertools
 
 # Scientific import(s)
 try:
@@ -57,6 +58,7 @@ class calculator (object):
         self._window = None
 
         self._clf = None
+        self._toyclfs = list()
         self._partialbins = True
         self._emptybins   = False
         self._fitted     = False
@@ -139,7 +141,7 @@ class calculator (object):
 
     def theta (self):
         """ The classifier 'theta' accessor """
-        return self._clf.theta_
+        return self._clf.theta_.flatten()
 
 
 
@@ -245,24 +247,26 @@ class calculator (object):
         # Fit weights
         if self._verbose: print "  Computing fit weights"
         msk_fit = (y > 0) # non-zero content
-        w = np.ones_like(s) * eps
-        w[msk_fit] = np.power(s[msk_fit], -1)
+        #w = np.ones_like(s) * eps
+        #w[msk_fit] = np.power(s[msk_fit], -1)
 
         # Remove empty bins (opt.)
         if self._emptybins:
             X_fit = X[:,:]
             y_fit = y[:]
-            w_fit = w[:]
+            #w_fit = w[:]
+            s_fit = s[:]
         else:
             if self._verbose: print "  Removing empty bins"
             X_fit = X[msk_fit,:]
             y_fit = y[msk_fit]
-            w_fit = w[msk_fit]
+            #w_fit = w[msk_fit]
+            s_fit = s[msk_fit]
             pass
 
         # Perform fit
         if self._verbose: print "  Performing fit to TF profile"
-        s_fit = np.power(w_fit, -1)
+        #s_fit = np.power(w_fit, -1)
         nugget = np.square(s_fit/(y_fit + eps)).ravel()
         if theta is None:
             # Using ML-optimised theta
@@ -279,6 +283,168 @@ class calculator (object):
 
         self._fitted = True
         return
+
+
+    def toysfit (self, N=1, theta=None):
+        """ ... """
+
+        # Check(s)
+        if self._verbose: print "  Performing checks"
+
+        # -- Mass window
+        assert (self._mass is None) == (self._window is None), "Both mass and window width must either be specified, or not."
+        assert (self._window is None) or (self._window < 1.), "Relative window width must be less than 100%."
+
+        # -- self._config
+        assert self._config, "Need configuration to fit."
+        assert type(self._config) == dict, "Configuration must be of type dict."
+        for field in ['params', 'pass', 'axes']:
+            assert field in self._config, "Configuration must contain field '{:s}'.".format(field)
+            pass
+        assert len(self._config['params']) == len(self._config['axes']), "Number of dimensions in parametrisation ({:d}) and number of axes definitions ({:d}) must agree".format(len(self._config['params']), len(self._config['axes']))
+
+        if self._fitted:
+            print "  Overwriting previous fit"
+            pass
+
+
+        # Preparing transfer factor for fitting
+        # ----------------------------------------------------------------------
+
+        # Get pass/fail masks
+        if self._verbose: print "  Getting pass- and fail masks for input data" 
+        msk_data_pass = self._config['pass'](self._data)
+        msk_data_fail = ~msk_data_pass
+
+        # Get pass/fail histograms
+        if self._verbose: print "  Generating pass- and fail histograms"
+        # -- CR (fit)
+        h_data_CR_pass     = get_histogram(self._data,     self._config['params'], self._config['axes'], mask=msk_data_pass &  in_CR(self._data,     self._mass, self._window))
+        h_data_CR_fail     = get_histogram(self._data,     self._config['params'], self._config['axes'], mask=msk_data_fail &  in_CR(self._data,     self._mass, self._window))
+
+        # -- SR (interpolation)
+        h_data_SR_pass     = get_histogram(self._data,     self._config['params'], self._config['axes'], mask=msk_data_pass & ~in_CR(self._data,     self._mass, self._window))
+        h_data_SR_fail     = get_histogram(self._data,     self._config['params'], self._config['axes'], mask=msk_data_fail & ~in_CR(self._data,     self._mass, self._window))
+
+        # Set up TF grid
+        if self._verbose: print "  Setting up grid for fitting"
+        X1, X2 = np.meshgrid(*self._config['centres'])
+        X = np.vstack((X1.ravel(), X2.ravel())).T
+
+
+        # Fitting transfer factor
+        # ----------------------------------------------------------------------
+        thetas = list()
+        for idx in range(N):
+            print "== Fitting experiment %*d/%d:" % (int(np.ceil(np.log10(N + 1))), idx + 1, N),
+
+            # Generate toy pass/fail histograms
+            h_toys_CR_pass = h_data_CR_pass.Clone('h_toys_CR_pass')
+            h_toys_CR_fail = h_data_CR_fail.Clone('h_toys_CR_fail')
+            h_toys_SR_pass = h_data_SR_pass.Clone('h_toys_SR_pass')
+            h_toys_SR_fail = h_data_SR_fail.Clone('h_toys_SR_fail')
+
+            h_toys_CR_pass.Reset()
+            h_toys_CR_fail.Reset()
+            h_toys_SR_pass.Reset()
+            h_toys_SR_fail.Reset()
+            
+            for binx, biny in itertools.product(1 + np.arange(h_toys_CR_pass.GetXaxis().GetNbins()),
+                                                1 + np.arange(h_toys_CR_pass.GetYaxis().GetNbins())):
+
+                # -- Get x- and y-coordinates
+                x = h_toys_CR_pass.GetXaxis().GetBinCenter(binx)
+                y = h_toys_CR_pass.GetYaxis().GetBinCenter(biny)
+
+                # -- Fill all toys histograms
+                content = np.random.poisson(h_data_CR_pass.GetBinContent(binx, biny))
+                for _ in range(content):
+                    h_toys_CR_pass.Fill(x, y)
+                    pass
+
+                content = np.random.poisson(h_data_CR_fail.GetBinContent(binx, biny))
+                for _ in range(content):
+                    h_toys_CR_fail.Fill(x, y)
+                    pass
+
+                content = np.random.poisson(h_data_SR_pass.GetBinContent(binx, biny))
+                for _ in range(content):
+                    h_toys_SR_pass.Fill(x, y)
+                    pass
+
+                content = np.random.poisson(h_data_SR_fail.GetBinContent(binx, biny))
+                for _ in range(content):
+                    h_toys_SR_fail.Fill(x, y)
+                    pass
+                pass
+
+            # ...
+
+            # Compute ratio
+            if self._verbose: print "  Getting TF ratio in SR and CR"
+            self._TF_CR_mean, self._TF_CR_err = get_ratio_numpy(h_toys_CR_pass, h_toys_CR_fail)
+            self._TF_SR_mean, self._TF_SR_err = get_ratio_numpy(h_toys_SR_pass, h_toys_SR_fail)
+
+            # Mean- and error arrays
+            if self._verbose: print "  Setting up mean- and error arrays"
+            y = self._TF_CR_mean.ravel()
+            s = self._TF_CR_err .ravel()
+                                   
+            # Remove empty bins        
+            if self._verbose: print "  Removing empty bins"
+            msk_fit = (y > 0) # non-zero content
+            X_fit = X[msk_fit,:]
+            y_fit = y[msk_fit]
+            s_fit = s[msk_fit]
+
+            # Perform fit
+            if self._verbose: print "  Performing fit to TF profile"
+            nugget = np.square(s_fit/(y_fit + eps)).ravel()
+            
+            if theta is None:
+                # Using ML-optimised theta
+                if self._verbose: print "  Using ML-optimised theta"
+                self._clf = GaussianProcess(theta0=[1E-01, 1E-01], thetaL=[1E-03, 1E-03], thetaU=[1E+01, 1E+01], nugget=nugget)
+            else:
+                # Using manually set theta
+                if self._verbose: print "  Using manually set theta"
+                self._clf = GaussianProcess(theta0=theta, nugget=nugget)
+                pass
+            
+            self._clf.fit(X_fit, y_fit)
+            
+            print "  Best value(s) of theta found:", self.theta()
+            
+            # Store lengths scales for each toy experiment
+            thetas.append(self.theta())
+            self._toyclfs.append(self._clf)
+            pass
+
+        print ""
+        print "== Mean toys thetas:", np.mean(thetas, axis=0)
+        print "== +1 sigma range:  ", np.percentile(thetas,        84.135, axis=0)
+        print "== -1 sigma range:  ", np.percentile(thetas, 100. - 84.135, axis=0)
+        print "== +2 sigma range:  ", np.percentile(thetas,        97.725, axis=0)
+        print "== -2 sigma range:  ", np.percentile(thetas, 100. - 97.725, axis=0)
+
+        print ""
+        self.fit()
+        base_theta = self.theta()
+        print "== Base theta:", base_theta
+
+        print ""
+        percx = np.sum(base_theta[0] > np.array([th[0] for th in thetas])) / float(len(thetas))
+        percy = np.sum(base_theta[1] > np.array([th[1] for th in thetas])) / float(len(thetas))
+        print "== Percentile of base fit wrt. toy experiments along x-axis: %.1f%%" % (percx * 100.)
+        print "== Percentile of base fit wrt. toy experiments along y-axis: %.1f%%" % (percy * 100.)
+
+        print ""
+        pvaluex = 2. * min(percx, 1 - percx)
+        pvaluey = 2. * min(percy, 1 - percy)
+        print "== p-value (two-sided) for base fit wrt. toy experiments along x-axis: %.1f%%" % (pvaluex * 100.)
+        print "== p-value (two-sided) for base fit wrt. toy experiments along y-axis: %.1f%%" % (pvaluey * 100.)
+
+        return thetas
 
 
     def fullfit (self):
@@ -303,9 +469,9 @@ class calculator (object):
         print "30% validation fit"
         self.window = 0.3
         self.fit(theta=theta)
-        w_nom     = self.weights(self._data[msk_data_fail])
-        w_up      = self.weights(self._data[msk_data_fail], shift=+1)
-        w_down    = self.weights(self._data[msk_data_fail], shift=-1)
+        w_nom  = self.weights(self._data[msk_data_fail])
+        w_up   = self.weights(self._data[msk_data_fail], shift=+1)
+        w_down = self.weights(self._data[msk_data_fail], shift=-1)
         
 
         # Compare data to estimate in VRs
@@ -393,6 +559,34 @@ class calculator (object):
         TF_err = np.sqrt(TF_err)
 
         return TF_pred + shift * TF_err
+
+
+    def toysweights (self, data, shift=1, exact=False):
+        """ Get transfer factor (TF) weights for toy experiment data. """
+
+        # Check(s)
+        assert len(self._toyclfs) > 0, "Must have called 'toysfit' before 'toysweights'."
+
+        # Store base classifier
+        baseclf = self._clf
+
+        # Compute weights for each toy classifier
+        result = list()
+        N = len(self._toyclfs)
+        print ""
+        for idx, clf in enumerate(self._toyclfs):
+            print "== Getting weights from experiment %*d/%d." % (int(np.ceil(np.log10(N + 1))), idx + 1, N)
+            self._clf = clf
+            result.append( (self.weights(data, shift=0,      exact=exact), 
+                            self.weights(data, shift=+shift, exact=exact), 
+                            self.weights(data, shift=-shift, exact=exact)) )
+            pass
+        
+        # Restore base classifier
+        self._clf = baseclf
+
+        return result
+        
 
 
     def fullweights (self, data, exact=False):
