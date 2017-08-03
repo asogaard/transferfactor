@@ -13,10 +13,12 @@ import numpy as np
 config = {
 
     # Base path for input files
-    'base_path' : 'data/', # '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/outputObjdef/2017-06-22/',
+    #'base_path' : '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/outputObjdef/2017-06-22/',
+    #'base_path' : '/afs/cern.ch/user/a/asogaard/Analysis/2016/BoostedJetISR/AnalysisTools/outputObjdef/',
+    'base_path' : '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/outputObjdef/2017-07-23/',
 
     # Path to cross-sections file
-    'xsec_file' : 'sampleInfo.csv', # '/afs/cern.ch/user/a/asogaard/public/Analysis/2016/BoostedJetISR/sampleInfo.csv',
+    'xsec_file' : '/afs/cern.ch/user/a/asogaard/public/Analysis/2016/BoostedJetISR/sampleInfo.csv',
 
     # Name of tree from which to read input data
     'tree'      : 'BoostedJet+ISRgamma/Nominal/EventSelection/Pass/NumLargeRadiusJets/Postcut',
