@@ -58,7 +58,9 @@ def main ():
         'ZHad': ROOT.kOrange + 4,
         'syst': ROOT.kGreen  + 1,
         }
-    qualifier = "Work In Progress"
+
+    #qualifier = "Work In Progress"
+    qualifier = "Internal"
    
 
     # W/Z plots
@@ -181,12 +183,14 @@ def main ():
         f.Close()
 
         # @TEMP: Blind search region for Laser's plots
+        '''
         for bin in np.arange(histograms['data'].GetXaxis().GetNbins(), dtype=int) + 1:
             if histograms['data'].GetXaxis().GetBinUpEdge(bin) > 100.:
                 histograms['data'].SetBinContent(bin, 0)
                 histograms['data'].SetBinError  (bin, 0)
                 pass
             pass
+            '''
         
         # Combine W/Z components
         histograms['WZHad'] = histograms['WHad'].Clone(histograms['WHad'].GetName().replace('W', 'WZ'))
@@ -237,7 +241,7 @@ def main ():
         c.ratio_plot((h_bkg_up,   h_sum), option='HIST')
         c.ratio_plot((h_bkg_down, h_sum), option='HIST')
         c.ratio_plot((h_sum,      h_sum), option='E2')
-        c.ratio_plot((histograms['data'], h_sum)) # @TEMP:, oob=True) taken out for Laser's plots
+        c.ratio_plot((histograms['data'], h_sum), oob=True) # @TEMP:, oob=True) taken out for Laser's plots
         
         # -- statistical test
         h_mc.Add(h_qcd)
@@ -278,9 +282,11 @@ def main ():
         c.legend(sort=True) # ymax=0.87
 
         # @TEMP: For Laser's blinded plots
+        '''
         print "===>", c.pads()[0].ylim()
         c.pads()[0].xline(100., linestyle=1, linewidth=1, linecolor=ROOT.kGray + 2, text='Blinded', text_align='TR')
         c.pads()[1].xline(100., linestyle=1, linewidth=1, linecolor=ROOT.kGray + 2,)
+        '''
 
         c.log(log)
 
