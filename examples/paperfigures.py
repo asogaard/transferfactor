@@ -58,7 +58,8 @@ def main ():
         'ZHad': ROOT.kOrange + 4,
         'syst': ROOT.kGreen  + 1,
         }
-            
+    qualifier = "Work In Progress"
+   
 
     # W/Z plots
     # --------------------------------------------------------------------------
@@ -128,16 +129,16 @@ def main ():
         # -- decorations
         c.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",
                 "%s channel" % ('Jet' if isrjet else 'Photon')],
-               qualifier="Internal")
+               qualifier=qualifier)
         c.xlabel('Large-#it{R} jet mass [GeV]')
         c.ylabel('Events / 2 GeV')
-        c.padding(0.45) # (0.37)
+        c.padding(0.47) # (0.45)
         if isrjet: pads[1].ylim(-1000, 5000)
         else:      pads[1].ylim( -140,  700)
         pads[1].ylabel('Data - background est.')
-        pads[1].yline(0)
+        pads[1].yline(0, linestyle=1, linecolor=ROOT.kBlack)
         c.region("SR", 0.8 * 85., 1.2 * 85.)
-        c.legend(ymax=0.875, sort=True)
+        c.legend(sort=True) # ymax=0.875,
         
         stats_string = "KS prob. = %.3f  |  #chi^{2}/N_{dof} (prob.) = %.1f/%d (%.3f)" % (KS, chi2, ndf, ROOT.TMath.Prob(chi2, ndf))
         #c.latex(stats_string, 0.95 , 0.96, NDC=True, align=31, textsize=16)
@@ -149,7 +150,7 @@ def main ():
 
     # Search plots
     # --------------------------------------------------------------------------
-    for isrjet, mass, log in itertools.product([True, False], [160, 220], [True, False]):
+    for isrjet, mass, log in itertools.product([True, False], [160, 220], [True]):
         
         if isrjet:
             f = ROOT.TFile(path + "hists_isrjet_%d.root" % mass)
@@ -178,6 +179,14 @@ def main ():
             pass
         
         f.Close()
+
+        # @TEMP: Blind search region for Laser's plots
+        for bin in np.arange(histograms['data'].GetXaxis().GetNbins(), dtype=int) + 1:
+            if histograms['data'].GetXaxis().GetBinUpEdge(bin) > 100.:
+                histograms['data'].SetBinContent(bin, 0)
+                histograms['data'].SetBinError  (bin, 0)
+                pass
+            pass
         
         # Combine W/Z components
         histograms['WZHad'] = histograms['WHad'].Clone(histograms['WHad'].GetName().replace('W', 'WZ'))
@@ -228,7 +237,7 @@ def main ():
         c.ratio_plot((h_bkg_up,   h_sum), option='HIST')
         c.ratio_plot((h_bkg_down, h_sum), option='HIST')
         c.ratio_plot((h_sum,      h_sum), option='E2')
-        c.ratio_plot((histograms['data'], h_sum), oob=True)
+        c.ratio_plot((histograms['data'], h_sum)) # @TEMP:, oob=True) taken out for Laser's plots
         
         # -- statistical test
         h_mc.Add(h_qcd)
@@ -248,7 +257,7 @@ def main ():
         # -- decorations
         c.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",
                 "%s channel" % ('Jet' if isrjet else 'Photon')],
-               qualifier="Internal")
+               qualifier=qualifier)
         c.xlabel('Large-#it{R} jet mass [GeV]')
         c.ylabel('Events / 5 GeV')
 
@@ -264,9 +273,15 @@ def main ():
             c.padding(0.35)
             pass
         pads[1].ylabel('Data / est.')
-        pads[1].yline(1)
-        c.region("SR", 0.8 * mass, 1.2 * mass) #, offset=(0.14 if (mass == 150 and not isrjet) else 0.07))
+        pads[1].yline(1, linestyle=1, linecolor=ROOT.kBlack)
+        c.region("SR", 0.8 * mass, 1.2 * mass, offset=0.07) #, offset=(0.14 if (mass == 150 and not isrjet) else 0.07))
         c.legend(sort=True) # ymax=0.87
+
+        # @TEMP: For Laser's blinded plots
+        print "===>", c.pads()[0].ylim()
+        c.pads()[0].xline(100., linestyle=1, linewidth=1, linecolor=ROOT.kGray + 2, text='Blinded', text_align='TR')
+        c.pads()[1].xline(100., linestyle=1, linewidth=1, linecolor=ROOT.kGray + 2,)
+
         c.log(log)
 
         stats_string = "KS prob. = %.3f  |  #chi^{2}/N_{dof} (prob.) = %.1f/%d (%.3f)" % (KS, chi2, ndf, ROOT.TMath.Prob(chi2, ndf))
@@ -346,7 +361,7 @@ def main ():
         # -- decorations
         c.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",
                 "%s channel" % ('Jet' if isrjet else 'Photon')],
-               qualifier="Simulation Internal")
+               qualifier="Simulation " + qualifier)
         c.xlabel("Large-#it{R} jet #tau_{21}^{DDT}")
         c.ylabel("Events (normalised to unit)")
         o.label("Relative improvement in significance")
@@ -390,7 +405,7 @@ def main ():
     c.padding(0.5)
     c.xlabel("Signal mass point [GeV]")
     c.ylabel("Acceptance, acc. #times efficiency (Z' #rightarrow large-#it{R} jet + #gamma/jet)")
-    c.text(["#sqrt{s} = 13 TeV"], qualifier="Simulation Internal")
+    c.text(["#sqrt{s} = 13 TeV"], qualifier="Simulation " + qualifier)
     c.legend(categories=[
             ("Acceptance",       {'fillcolor': ROOT.kGray,                        'option': 'LF'}),
             ("Acc. #times eff.", {'fillcolor': ROOT.kGray + 2, 'fillstyle': 3245, 'option': 'LF'}),
@@ -465,7 +480,7 @@ def main ():
         # Decorations
         c.xlabel('Signal jet #tau_{21}^{DDT}')
         c.ylabel('Jets (normalised to unit)')
-        c.text(["#sqrt{s} = 13 TeV", "%s selection" % ('Jet' if isrjet else 'Photon')], qualifier="Simulation Internal")
+        c.text(["#sqrt{s} = 13 TeV", "%s selection" % ('Jet' if isrjet else 'Photon')], qualifier="Simulation " + qualifier)
         c.padding(0.50)
 
         ymax = 0.735
