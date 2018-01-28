@@ -46,7 +46,7 @@ except ImportError:
 # Command-line arguments parser
 import argparse
 
-parser = argparse.ArgumentParser(description='Perform closure test.')
+parser = argparse.ArgumentParser(description='Perform signal mass spectrum interpolation.')
 
 parser.add_argument('--show', dest='show', action='store_const',
                     const=True, default=False,
@@ -91,7 +91,7 @@ def main ():
 
     # Load data
     if not args.isrjet:
-        data = {var: loadData(files, tf.config['finaltree'].replace('Nominal', var), prefix=tf.config['prefix']) for var in variations}
+        data = {var: loadData(files, tf.config['finaltree'] .replace('Nominal', var), prefix=tf.config['prefix']) for var in variations}
         info = {var: loadData(files, tf.config['outputtree'].replace('Nominal', var), stop=1) for var in variations}
         
         # Scaling by cross section
@@ -132,10 +132,14 @@ def main ():
     # Perform interpolation of signal mass peaks
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
-    closure = False
+    closure = True
 
     # Store mass points
-    massPoints = np.array([100, 130, 160, 190, 220])
+    if closure:
+        massPoints = np.array([100, 130,      190, 220])
+    else:
+        massPoints = np.array([100, 130, 160, 190, 220])
+        pass
     massVec = ROOT.TVectorD(len(massPoints))
     for i in range(len(massPoints)):
         massVec[i] = massPoints[i]
@@ -171,8 +175,10 @@ def main ():
     pdfs = ROOT.RooArgList(*[workspace.pdf('model{i}'.format(i=i)) for i in range(len(massPoints))])
     integrals = np.zeros((len(massPoints),), dtype=float)
     events    = np.zeros((len(massPoints),), dtype=float)
-    for idx in range(len(massPoints)):
-        DSID = idx + (308363 if not args.isrjet else 0)
+    #for idx in range(len(massPoints)):
+    for idx, mass in enumerate(massPoints):
+        #DSID = idx + (308363 if not args.isrjet else 0)
+        DSID = (mass - 100) / 30 + (308363 if not args.isrjet else 0)
         print "==> %d" % DSID
 
         # Create data histogram for fitting
@@ -205,7 +211,8 @@ def main ():
     morph.Print('v')
 
     # Make plots of interpolated p.d.f.s
-    interpolationMassPoints = np.linspace(100, 220, (220 - 100) / 10 + 1, endpoint=True)
+    #interpolationMassPoints = np.linspace(100, 220, (220 - 100) / 10 + 1, endpoint=True)
+    interpolationMassPoints = np.linspace(100, 220, (220 - 100) / 5 + 1, endpoint=True)
     interpolationMassPoints = sorted(list(set(interpolationMassPoints) - set(massPoints)))
     """ @TEMP: BEGIN """
     # -- Interpolate logarithmically between integrals
@@ -226,32 +233,141 @@ def main ():
 
     # Interpolation closure
     if closure:
-        for i in [2]:
-            DSID = 308363 + i
-            print "==> %d" % DSID
-            
-            # Create data histogram for fitting
-            msk = (data[nominal]['DSID'] == DSID)        
-            hist = c.hist(data[nominal][m][msk], bins=bins, weights=data[nominal]['weight'][msk], normalise=True, display=False)
-            
-            # Add minimal error to empty bins
-            emax = np.finfo(float).max
-            for bin in range(1, hist.GetXaxis().GetNbins() + 1):
-                if hist.GetBinError(bin) == 0: hist.SetBinError(bin, emax)
-                pass
-            
-            # Create RooFit histogram and p.d.f.
-            rdh = ROOT.RooDataHist('rdh', 'rdh', ROOT.RooArgList(mJ), hist)
-            rhp = ROOT.RooHistPdf ('rhp', 'rhp', ROOT.RooArgSet (mJ), rdh)
-            
-            # Plot data histogram and fit
-            rhp    .plotOn(frame, ROOT.RooFit.LineColor(1), ROOT.RooFit.LineStyle(1))
+
+        # Get mass and DSID
+        idx = 2
+        mass = 100 + idx * 30
+        DSID = idx + (308363 if not args.isrjet else 0)
+        
+        print "Performing closure test with %d" % DSID
+        
+        # Create data histogram for fitting
+        msk = (data[nominal]['DSID'] == DSID)        
+        hist = c.hist(data[nominal][m][msk], bins=bins, weights=data[nominal]['weight'][msk], normalise=True, display=False)
+        
+        # Add minimal error to empty bins
+        emax = np.finfo(float).max
+        for bin in range(1, hist.GetXaxis().GetNbins() + 1):
+            if hist.GetBinError(bin) == 0: hist.SetBinError(bin, emax)
             pass
         
-        for massval in np.linspace(135, 185, 9, endpoint=True):
-            mZ.setVal(massval)
-            morph.plotOn(frame, ROOT.RooFit.LineColor(ROOT.kBlue), ROOT.RooFit.LineStyle(2), ROOT.RooFit.LineWidth(3 if massval == 160 else 1))    
+        # Create RooFit histogram and p.d.f.
+        rdh = ROOT.RooDataHist('rdh', 'rdh', ROOT.RooArgList(mJ), hist)
+        rhp = ROOT.RooHistPdf ('rhp', 'rhp', ROOT.RooArgSet (mJ), rdh)
+        
+        # Plot data histogram and fit
+        rhp    .plotOn(frame, ROOT.RooFit.LineColor(1), ROOT.RooFit.LineStyle(1))
+
+        # Plot morphed distribution
+        mZ.setVal(mass)
+        morph.plotOn(frame, ROOT.RooFit.LineColor(ROOT.kBlue - 4), ROOT.RooFit.LineStyle(2), ROOT.RooFit.LineWidth(3))
+        
+        # Get RooFit chi2 value
+        workspace.factory('Gaussian::signal{i}(mJ, mu_sig_{i}[{mean},0,300], sigma_sig_{i}[{width},0,50])'.format(i=4, mean=mass, width=mass*0.1))
+        if not args.isrjet:
+            workspace.factory('Gaussian::background{i}(mJ, mu_bkg_{i}[0,0,0], sigma_bkg_{i}[100,50,500])'.format(i=4))
+        else:
+            workspace.factory('Exponential::background{i}(mJ, tau_bkg_{i}[-0.01,-100,0])'.format(i=4))
             pass
+
+        workspace.factory('SUM::model{i}(norm_sig_{i}[2,0,10]*signal{i}, norm_bkg_{i}[1,1,1]*background{i})'.format(i=4))
+
+        interp_pdf = workspace.pdf('model{i}'.format(i=4))
+        interp_pdf.chi2FitTo(rdh, ROOT.RooLinkedList())
+
+        # Compute chi2 for data histogram vs. interpolated one
+        h_data = rhp       .createHistogram("h_data", mJ)
+        h_est  = morph     .createHistogram("h_est",  mJ)
+        h_fit  = interp_pdf.createHistogram("h_fit",  mJ)
+        h_fit.Scale(1./h_fit.Integral())
+
+        chi2 = 0.
+        for bin in range(1, h_est.GetXaxis().GetNbins() + 1):
+            o = h_fit.GetBinContent(bin) # Fitted
+            p = h_est.GetBinContent(bin) # Interpolated
+            chi2 += np.square(o - p) / o
+            pass
+        N = np.sum(msk)
+        chi2 *= N
+        ndf = h_est.GetXaxis().GetNbins() - 1
+
+        prob = ROOT.TMath.Prob(chi2, ndf)
+        print "Chi2 = %.2f | Ndf = %d | p = %.3f" % (chi2, ndf, prob)
+
+
+        #for h in [h_data, h_est, h_fit]:
+        #    print ">> %.3f" % h.Integral()
+        #    pass
+
+        #hist.Scale(h_est.Integral()/hist.Integral())
+        #h_est.Scale(hist.Integral()/h_est.Integral())
+        #h_fit.Scale(hist.Integral()/h_fit.Integral())
+        #for bin in range(1, h_est.GetXaxis().GetNbins() + 1):
+        #    h_est.SetBinError(bin, 0)
+        #    pass
+
+        h_fit.Scale(N)
+        h_est.Scale(N)
+        for bin in range(1, h_est.GetXaxis().GetNbins() + 1):
+            h_fit.SetBinError(bin, np.sqrt(h_fit.GetBinContent(bin)))
+            h_est.SetBinError(bin, np.sqrt(h_est.GetBinContent(bin)))
+            pass
+
+        print "Chi2 prob. = %.3f" % h_fit.Chi2Test(h_est, "WW P")
+        print "KS prob.   = %.3e / %.3e" % (h_fit.KolmogorovTest(h_est), h_est.KolmogorovTest(h_fit))
+
+        c = ap.canvas()
+        c.hist(h_data, label='Data',          linecolor=ROOT.kBlack)
+        c.hist(h_est,  label='Interpolation', linecolor=ROOT.kRed,  linestyle=2)
+        c.hist(h_fit,  label='Fit',           linecolor=ROOT.kBlue, linestyle=2)
+        c.legend()
+        c.show()
+
+        return
+
+        chi2var = ROOT.RooChi2Var("chi2", "chi2", morph, rdh)
+        chi2 = chi2var.getVal()
+        print "(1) CHI2:", chi2 
+
+        chi2var = ROOT.RooChi2Var("chi2", "chi2", morph, interp_pdf)
+        chi2 = chi2var.getVal()
+        print "(2) CHI2:", chi2 
+
+        #for bin in range(1, hist.GetXaxis().GetNbins() + 1):
+        #    print "-- %.1f :%.5f vs. %.5f / %.3f" % (hist.GetBinCenter(bin), hist.GetBinContent(bin), h_est.GetBinContent(bin), hist.GetBinContent(bin) / h_est.GetBinContent(bin))
+        #    pass
+
+        #hist.scale(1./hist.Integral())
+        '''
+        chi2 = 0.
+        N = np.sum(msk)
+        print "N = %.1f" % N
+        O = 0
+        P = 0
+        for bin in range(1, hist.GetXaxis().GetNbins() + 1):
+            mJ.setVal(hist.GetXaxis().GetBinCenter(bin))
+            o = rhp  .getVal(ROOT.RooArgSet(mJ))
+            p = morph.getVal(ROOT.RooArgSet(mJ))
+            #print "  morph(%.1f) = %.5f vs. %.5f / %.3f" % (mJ.getVal(), o, p, o/p)
+            chi2 += np.square(o * 5. - p * 5.) / (p * 5.)
+            O += o
+            P += p
+            pass
+        chi2 *= N
+        ndf = hist.GetXaxis().GetNbins() - 1
+        prob = ROOT.TMath.Prob(chi2, ndf)
+        #print "O =", O
+        #print "P =", P
+        #print "Chi2 = %.2f | Ndf = %d | p = %.3f" % (chi2, ndf, prob)
+        '''
+
+        #for massval in np.linspace(135, 185, 9, endpoint=True):
+        #    mZ.setVal(massval)
+        #    morph.plotOn(frame, ROOT.RooFit.LineColor(ROOT.kBlue), ROOT.RooFit.LineStyle(2), ROOT.RooFit.LineWidth(3 if massval == 160 else 1))    
+        #    pass
+
+        # Compute chi2 value
+        # ...
         pass
 
     # Draw frame
@@ -306,7 +422,7 @@ def main ():
             else:
                 filename = 'sig_%d.root' % mass
                 pass
-            outputdir = '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/StatsInputs/2017-07-19/'
+            outputdir = '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/StatsInputs/2017-08-06/'
             #output = ROOT.TFile('output/' + filename, 'RECREATE')
             output = ROOT.TFile(outputdir + filename, 'RECREATE')
 

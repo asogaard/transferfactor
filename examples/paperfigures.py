@@ -23,13 +23,14 @@ try:
     from rootplotting.tools import *
     from rootplotting.style import *
     from snippets.functions import dict_product
+    import root_numpy
 except ImportError:
     print "WARNING: This script uses the 'transferfactor' and 'rootplotting' packages. Clone them as e.g.:"
     print "         $ git clone git@github.com:asogaard/transferfactor.git"
     print "         $ git clone git@github.com:asogaard/rootplotting.git"
     sys.exit()
     pass
-    
+
 # Command-line arguments parser
 import argparse
 
@@ -49,7 +50,6 @@ def main ():
     # Parse command-line arguments
     args = parser.parse_args()
 
-
     path = "/afs/cern.ch/user/a/asogaard/public/dijetisr/paperfigures/"
 
     compcolours = {
@@ -59,68 +59,88 @@ def main ():
         'syst': ROOT.kGreen  + 1,
         }
 
-    #qualifier = "Work In Progress"
-    qualifier = "Internal"
-   
+    qualifier = "" # "Internal" # "Internal"
+
+    # Setup
+    # -- Limit the number of axis digits to 4 from 5, to reduce clutter
+    ROOT.TGaxis.SetMaxDigits(4)
+
 
     # W/Z plots
     # --------------------------------------------------------------------------
     for isrjet in [True, False]:
-        
+
         if isrjet:
             f = ROOT.TFile(path + "hists_isrjet_WZ.root")
         else:
             f = ROOT.TFile(path + "hists_isrgamma_WZ.root")
             pass
-        
+
         names = ['QCD', 'QCD_up', 'QCD_down', 'data', 'WHad', 'ZHad']
-        
+
         histograms = dict()
         for name in names:
             hist = f.Get('h_mJ_' + name)
             hist.SetDirectory(0)
+            # Store histogram
             histograms[name] = hist
             pass
-        
+
         f.Close()
-        
+
         # Combine  W/Z component
         histograms['WZHad'] = histograms['WHad'].Clone(histograms['WHad'].GetName().replace('W', 'WZ'))
         histograms['WZHad'].Add(histograms['ZHad'])
-        
+
+        # Compute systematics band
+        histograms['syst'] = histograms['QCD'].Clone("h_mJ_syst")
+        for bin in range(1, histograms['syst'].GetXaxis().GetNbins() + 1):
+            nom  = histograms['QCD']     .GetBinContent(bin)
+            up   = histograms['QCD_up']  .GetBinContent(bin)
+            down = histograms['QCD_down'].GetBinContent(bin)
+            histograms['syst'].SetBinError(bin, max(abs(up - nom), abs(nom - down)))
+            pass
+
         # -- canvas
         c = ap.canvas(num_pads=2, fraction=0.45, batch=not args.show)
         pads = c.pads()
-        
+
         # -- main pad
         h_mc   = c.stack(histograms['QCD'],  fillcolor=compcolours['QCD'],  label='Background est.')
         h_zhad = c.stack(histograms['ZHad'], fillcolor=compcolours['ZHad'], label='Z + %s' % ('jets' if isrjet else '#gamma'))
         h_whad = c.stack(histograms['WHad'], fillcolor=compcolours['WHad'], label='W + %s' % ('jets' if isrjet else '#gamma'))
         h_sum = c.hist(histograms['QCD'], fillstyle=3245, fillcolor=ROOT.kGray + 3, option='E2',
-                       label='Stat. uncert.')
-        
+                       label='Bkg. stat. uncert.')
+
+        """ Using green dashed line to indicate syst error"
         h_bkg_up   = c.hist(histograms['QCD_up'],   linestyle=2, linecolor=compcolours['syst'], label='Syst. uncert.')
         h_bkg_down = c.hist(histograms['QCD_down'], linestyle=2, linecolor=compcolours['syst'])
-        
-        h_data = c.plot (histograms['data'], label='Data')
-        
+        """
+        h_syst = c.hist(histograms['syst'], fillstyle=1001, alpha=0.30, fillcolor=ROOT.kGray + 3, option='E2',
+                        label='Bkg. syst. uncert.')
+
+
+        h_data = c.plot (histograms['data'], label='Data', option='PE0X0', legend_option='PE')
+
         # -- diff pad
         pads[1].hist(histograms['WZHad'], fillcolor=compcolours['WHad'], option='HIST')
         pads[1].hist(histograms['ZHad'],  fillcolor=compcolours['ZHad'], option='HIST')
-        c.diff_plot((h_bkg_up,   histograms['QCD']), option='HIST')
-        c.diff_plot((h_bkg_down, histograms['QCD']), option='HIST')
-        c.diff_plot((histograms['data'], histograms['QCD']))
-        
+        #c.diff_plot((h_bkg_up,   histograms['QCD']), option='HIST')
+        #c.diff_plot((h_bkg_down, histograms['QCD']), option='HIST')
+        c.diff_plot((histograms['syst'],  histograms['QCD']), fillcolor=ROOT.kGray + 3, alpha=0.30, option='E2', uncertainties=False)
+        c.diff_plot((histograms['data'],  histograms['QCD']), option='PE0X0')
+
         # -- statistical test
         h_mc.Add(h_zhad)
         h_mc.Add(h_whad)
         for bin in range(1, h_mc.GetXaxis().GetNbins()):
             stat = h_mc.GetBinError(bin)
 
-            nom  = h_sum     .GetBinContent(bin)
-            up   = h_bkg_up  .GetBinContent(bin)
-            down = h_bkg_down.GetBinContent(bin)
-            syst = max(abs(up-nom), abs(down-nom))
+            #nom  = h_sum     .GetBinContent(bin)
+            #up   = h_bkg_up  .GetBinContent(bin)
+            #down = h_bkg_down.GetBinContent(bin)
+            #syst = max(abs(up-nom), abs(down-nom))
+            syst = histograms['syst'].GetBinError(bin)
 
             h_mc.SetBinError(bin, np.sqrt( np.square(stat) + np.square(syst) ))
             pass
@@ -129,7 +149,8 @@ def main ():
         ndf = h_mc.GetXaxis().GetNbins() - 1
 
         # -- decorations
-        c.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",
+        c.text(["#sqrt{s} = 13 TeV,  36.1 fb^{-1}",
+                "W/Z validation",
                 "%s channel" % ('Jet' if isrjet else 'Photon')],
                qualifier=qualifier)
         c.xlabel('Large-#it{R} jet mass [GeV]')
@@ -140,8 +161,8 @@ def main ():
         pads[1].ylabel('Data - background est.')
         pads[1].yline(0, linestyle=1, linecolor=ROOT.kBlack)
         c.region("SR", 0.8 * 85., 1.2 * 85.)
-        c.legend(sort=True) # ymax=0.875,
-        
+        c.legend(ymax=0.891) # ..., sort=True)
+
         stats_string = "KS prob. = %.3f  |  #chi^{2}/N_{dof} (prob.) = %.1f/%d (%.3f)" % (KS, chi2, ndf, ROOT.TMath.Prob(chi2, ndf))
         #c.latex(stats_string, 0.95 , 0.96, NDC=True, align=31, textsize=16)
 
@@ -152,8 +173,10 @@ def main ():
 
     # Search plots
     # --------------------------------------------------------------------------
-    for isrjet, mass, log in itertools.product([True, False], [160, 220], [True]):
-        
+    for isrjet, mass, log in itertools.product([True, False], [140, 150, 160, 220], [True]):
+
+        if isrjet and mass == 140: continue # Sample not available
+
         if isrjet:
             f = ROOT.TFile(path + "hists_isrjet_%d.root" % mass)
         else:
@@ -165,37 +188,69 @@ def main ():
                 f = ROOT.TFile(path + "hists_isrgamma_datadistributions_%dGeV.root" % mass)
                 pass
             pass
-        
+
         names = ['QCD', 'QCD_up', 'QCD_down', 'data', 'WHad', 'ZHad', 'sig']
+
+        def normalise (hist):
+            """Divide histogram by binwidth."""
+            for bin in range(1, hist.GetXaxis().GetNbins() + 1):
+                hist.SetBinContent(bin, hist.GetBinContent(bin) / float(hist.GetBinWidth(bin)))
+                hist.SetBinError  (bin, hist.GetBinError  (bin) / float(hist.GetBinWidth(bin)))
+                pass
+            return hist
         
         histograms = dict()
         for name in names:
             hist = f.Get('h_mJ_' + name)
             try:
                 hist.SetDirectory(0)
+
+                if not isrjet:
+                    hist = normalise(hist)
+                    pass
                 histograms[name] = hist
-            except: 
+
+            except:
                 # This mass point doesn't have a signal shape
                 warning("Mass point %d doesn't have a signal shape." % mass)
+                
+                # Try to access the interpolated signal
+                interp_path="/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/StatsInputs/2017-08-06/"
+                interp_filename="{}_{:d}.root".format("sig" if isrjet else "ISRgamma_signal", mass)
+                interp_f = ROOT.TFile(interp_path + interp_filename, "READ")
+                interp_treename = ("Signal_ISRjet_{:d}" if isrjet else "SIGNAL_{:d}_Nominal").format(mass)
+                interp_t = interp_f.Get(interp_treename)
+                array = root_numpy.tree2array(interp_t)
+                fields = list(array.dtype.names)
+        
+                # -- Fill new histogram for interpolated signal
+                bins = tf.config['massbins']
+                c = ap.canvas(batch=True)
+                warning("Fields : [{}, {}]".format(*fields))
+                h_interp = c.hist(array[fields[0]], bins=bins, weights=array[fields[1]], display=False)
+                warning("  Setting interpolated histogram as '{}'".format(name))
+                histograms[name] = normalise(h_interp)
                 pass
             pass
-        
+
         f.Close()
 
-        # @TEMP: Blind search region for Laser's plots
-        '''
-        for bin in np.arange(histograms['data'].GetXaxis().GetNbins(), dtype=int) + 1:
-            if histograms['data'].GetXaxis().GetBinUpEdge(bin) > 100.:
-                histograms['data'].SetBinContent(bin, 0)
-                histograms['data'].SetBinError  (bin, 0)
+        # Divide by bins width
+        """
+        if not isrjet:
+            for hist in histograms.itervalues():
+                for bin in range(1, hist.GetXaxis().GetNbins() + 1):
+                    hist.SetBinContent(bin, hist.GetBinContent(bin) / float(hist.GetBinWidth(bin)))
+                    hist.SetBinError  (bin, hist.GetBinError  (bin) / float(hist.GetBinWidth(bin)))
+                    pass
                 pass
             pass
-            '''
-        
+        #"""
+
         # Combine W/Z components
         histograms['WZHad'] = histograms['WHad'].Clone(histograms['WHad'].GetName().replace('W', 'WZ'))
         histograms['WZHad'].Add(histograms['ZHad'])
-        
+
         # Add stat. and syst. uncert. in quadrature
         for bin in range(1, histograms['QCD'].GetXaxis().GetNbins() + 1):
             stat = histograms['QCD']     .GetBinError(bin)
@@ -207,49 +262,62 @@ def main ():
             histograms['QCD_down'].SetBinContent(bin, nom - np.sqrt(np.square(stat) + np.square(syst)))
             pass
 
-        
+
         # Add W/Z component to background variations
         histograms['QCD_up']  .Add(histograms['WZHad'])
         histograms['QCD_down'].Add(histograms['WZHad'])
-        
+
         # -- canvas
         c = ap.canvas(num_pads=2, batch=not args.show)
         pads = c.pads()
-        
+
         # -- main pad
         h_mc = c.stack(histograms['WZHad'], fillcolor=compcolours['WHad'], label='W/Z + %s' % ('jets' if isrjet else '#gamma'))
         h_qcd = c.stack(histograms['QCD'],   fillcolor=compcolours['QCD'],  label='Background est.')
-          
+
+        if 'sig' in histograms:
+            c.hist(histograms['sig'], linestyle=1, linecolor=ROOT.kViolet+2, label="Z' (%d GeV)" % mass)
+        else:
+            warning("Key 'sig' not in `histograms`")
+            pass
+
         h_sum = c.getStackSum()
         h_sum = c.hist(h_sum, fillstyle=3245, fillcolor=ROOT.kGray + 3, option='E2',
-                       label='Stat. uncert.')
-        
+                       label='Bkg. stat. uncert.')
+
+        """ Using green dashed line to indicate stat + syst error"
         h_bkg_up   = c.hist(histograms['QCD_up'],   linestyle=2, linecolor=compcolours['syst'],
                             label='Stat. #oplus syst.')
         h_bkg_down = c.hist(histograms['QCD_down'], linestyle=2, linecolor=compcolours['syst'])
-        
-        if 'sig' in histograms:
-            c.hist(histograms['sig'], linestyle=1, linecolor=ROOT.kViolet+2, label="Z' (%d GeV)" % mass)
+        """
+        h_bkg_var = h_sum.Clone("h_bkg_var")
+        for bin in range(1, h_bkg_var.GetXaxis().GetNbins() + 1):
+            nom  = h_sum                 .GetBinContent(bin)
+            up   = histograms['QCD_up']  .GetBinContent(bin)
+            down = histograms['QCD_down'].GetBinContent(bin)
+            h_bkg_var.SetBinError(bin, max(abs(up - nom), abs(nom - down)))
             pass
-        
-        h_data = c.plot (histograms['data'], label='Data')
-        
+        h_bkg_var = c.hist(h_bkg_var, fillstyle=1001, alpha=0.30, fillcolor=ROOT.kGray + 3, option='E2',
+                           label='Bkg. stat. #oplus syst.')
+
+        h_data = c.plot (histograms['data'], label='Data', option='PE0X0', legend_option='PE')
+
         # -- diff pad
-        if isrjet: pads[1].ylim(0.95, 1.05)
-        else:      pads[1].ylim(0.8, 1.2)
-        
-        c.ratio_plot((h_bkg_up,   h_sum), option='HIST')
-        c.ratio_plot((h_bkg_down, h_sum), option='HIST')
+        if isrjet: pads[1].ylim(0.98, 1.02)
+        else:      pads[1].ylim(0.85, 1.15)
+
+        c.ratio_plot((h_bkg_var,  h_sum), option='E2')
         c.ratio_plot((h_sum,      h_sum), option='E2')
-        c.ratio_plot((histograms['data'], h_sum), oob=True) # @TEMP:, oob=True) taken out for Laser's plots
-        
+        c.ratio_plot((histograms['data'], h_sum), option='PE0X0', oob=True) 
+
         # -- statistical test
         h_mc.Add(h_qcd)
         for bin in range(1, h_mc.GetXaxis().GetNbins()):
             nom  = h_mc      .GetBinContent(bin)
-            up   = h_bkg_up  .GetBinContent(bin)
-            down = h_bkg_down.GetBinContent(bin)
-            statPlusSyst = max(abs(up-nom), abs(down-nom))
+            #up   = h_bkg_up  .GetBinContent(bin)
+            #down = h_bkg_down.GetBinContent(bin)
+            #statPlusSyst = max(abs(up-nom), abs(down-nom))
+            statPlusSyst = h_bkg_var.GetBinError(bin)
 
             # h_bkg_{up,down} are stats. oplus syst.
             h_mc.SetBinError(bin, statPlusSyst)
@@ -259,39 +327,33 @@ def main ():
         ndf  = h_mc.GetXaxis().GetNbins() - 1
 
         # -- decorations
-        c.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",
-                "%s channel" % ('Jet' if isrjet else 'Photon')],
+        c.text(["#sqrt{s} = 13 TeV,  36.1 fb^{-1}",
+                 "%s channel" % ('Jet' if isrjet else 'Photon')
+                ],
                qualifier=qualifier)
         c.xlabel('Large-#it{R} jet mass [GeV]')
-        c.ylabel('Events / 5 GeV')
+        c.ylabel('Events / GeV') # ... / 5 GeV
 
         if isrjet:
-            c.ymin(150.)
+            c.ymin(150. / 5.)
         else:
-            c.ymin(5.)
+            c.ymin(10. / 5.)
             pass
 
         if log:
-            c.padding(0.45) # 0.50
+            c.padding(0.42) # 0.45 | 0.50
         else:
             c.padding(0.35)
             pass
         pads[1].ylabel('Data / est.')
         pads[1].yline(1, linestyle=1, linecolor=ROOT.kBlack)
         c.region("SR", 0.8 * mass, 1.2 * mass, offset=0.07) #, offset=(0.14 if (mass == 150 and not isrjet) else 0.07))
-        c.legend(sort=True) # ymax=0.87
-
-        # @TEMP: For Laser's blinded plots
-        '''
-        print "===>", c.pads()[0].ylim()
-        c.pads()[0].xline(100., linestyle=1, linewidth=1, linecolor=ROOT.kGray + 2, text='Blinded', text_align='TR')
-        c.pads()[1].xline(100., linestyle=1, linewidth=1, linecolor=ROOT.kGray + 2,)
-        '''
+        c.legend(ymax=0.89) # ..., sort=True)
 
         c.log(log)
 
+
         stats_string = "KS prob. = %.3f  |  #chi^{2}/N_{dof} (prob.) = %.1f/%d (%.3f)" % (KS, chi2, ndf, ROOT.TMath.Prob(chi2, ndf))
-        #c.latex(stats_string, 0.95 , 0.955, NDC=True, align=31, textsize=16)
 
         if args.save: c.save('plots/paperplot_%s_%dGeV%s.pdf' % ('jet' if isrjet else 'gamma', mass, '_log' if log else ''))
         if args.show: c.show()
@@ -302,19 +364,19 @@ def main ():
     # --------------------------------------------------------------------------
     mass = 160
     for isrjet in [True, False]: # [True, False]:
-        
+
         if isrjet:
             f = ROOT.TFile(path + "hists_isrjet_cutoptimisation.root")
         else:
             f = ROOT.TFile(path + "hists_isrgamma_cutoptimisation.root")
             pass
-              
+
         if not isrjet:
             names = ['h_tau21DDT_bkg', 'h_tau21DDT_sig%d' % mass, 'gr_improvements_sig%d' % mass]
         else:
             names = ['h_bkg_plot', 'h_sig_plot', 'Graph']
             pass
-        
+
         histograms = dict()
         for name, title in zip(names, ['bkg', 'sig', 'impr']):
             hist = f.Get(name)
@@ -325,9 +387,9 @@ def main ():
                 pass
             histograms[title] = hist
             pass
-        
+
         f.Close()
- 
+
         # Normalise graph
         gr = histograms['impr']
         N = gr.GetN()
@@ -338,19 +400,19 @@ def main ():
             gr.GetPoint(i, x, y)
             gr.SetPoint(i, float(x), float(y)/base)
             pass
-       
+
         # -- canvas
         c = ap.canvas(num_pads=1, batch=not args.show)
         pads = c.pads()
-        
+
         # -- main pad
         c.hist(histograms['bkg'], fillcolor=compcolours['QCD'],  label="Incl. #gamma MC" if not isrjet else "Multijet MC")
         c.hist(histograms['sig'], linecolor=compcolours['WHad'], label="Z' (%d GeV)" % mass)
-        
+
         # -- overlay
         o = ap.overlay(c, color=ROOT.kViolet)
         o.graph(histograms['impr'], linecolor=ROOT.kViolet, linewidth=2, option='L')
-        
+
         # Get point of maximum improvement
         gr = histograms['impr']
         N = gr.GetN()
@@ -363,16 +425,16 @@ def main ():
                 pass
             pass
         o.line(xmax, 0, xmax, ymax)
-        
+
         # -- decorations
-        c.text(["#sqrt{s} = 13 TeV,  L = 36.1 fb^{-1}",
+        c.text(["#sqrt{s} = 13 TeV,  36.1 fb^{-1}",
                 "%s channel" % ('Jet' if isrjet else 'Photon')],
                qualifier="Simulation " + qualifier)
         c.xlabel("Large-#it{R} jet #tau_{21}^{DDT}")
-        c.ylabel("Events (normalised to unit)")
+        c.ylabel("Fraction of events")
         o.label("Relative improvement in significance")
         c.legend(width=0.26)
-        
+
         if args.show: c.show()
         if args.save: c.save('plots/paperplot_%s_%dGeV_cutoptimisation.pdf' % ('jet' if isrjet else 'gamma', mass))
         pass
@@ -400,6 +462,22 @@ def main ():
             acceff = f.Get('acceff')
             pass
 
+
+        print ""
+        print "-" * 40
+        print "ISR jet:", isrjet
+        x, y = ROOT.Double(), ROOT.Double()
+        print "Acceptance:"
+        for i in range(acc.GetN()):
+            acc.GetPoint(i,x,y)
+            print "  (x,y) = ({},{})".format(x,y)
+            pass
+        print "Acceptance x efficiency:"
+        for i in range(acceff.GetN()):
+            acceff.GetPoint(i,x,y)
+            print "  (x,y) = ({},{})".format(x,y)
+            pass
+
         # -- Draw graphs
         opts = {'linecolor': colours[idx], 'fillcolor': colours_light[idx], 'markercolor': colours[idx], 'linewidth': 2}
         c.graph(acc,     option=('A' if idx == 0 else '') + '3', label="%s channel" % ('Photon' if not isrjet else 'Jet'), legend_option='L', **opts)
@@ -408,14 +486,17 @@ def main ():
         c.graph(acceff, option='3L', fillstyle=3245, **opts)
         pass
 
-    c.padding(0.5)
-    c.xlabel("Signal mass point [GeV]")
+    c.log()
+    #c.padding(0.4)
+    #c.ymin(1.0E-04)
+    c.ylim(1E-04, 1E+00)
+    c.xlabel("m_{Z'} [GeV]")
     c.ylabel("Acceptance, acc. #times efficiency (Z' #rightarrow large-#it{R} jet + #gamma/jet)")
     c.text(["#sqrt{s} = 13 TeV"], qualifier="Simulation " + qualifier)
     c.legend(categories=[
             ("Acceptance",       {'fillcolor': ROOT.kGray,                        'option': 'LF'}),
             ("Acc. #times eff.", {'fillcolor': ROOT.kGray + 2, 'fillstyle': 3245, 'option': 'LF'}),
-            ], reverse=True)
+            ], reverse=True)#, ymax=0.84)
     if args.save: c.save('plots/paperplot_acceptance.pdf')
     if args.show: c.show()
 
@@ -423,17 +504,17 @@ def main ():
     # Tau21 distributions
     # --------------------------------------------------------------------------
 
-    for isrjet in [True, False]:
+    for isrjet, ddt in itertools.product([True, False], ['', 'DDT']):
 
         # Create canvas
         c = ap.canvas(batch=not args.show)
-        
+
         if isrjet:
-            f = ROOT.TFile(path + "hists_isrjet_tau21DDTslices.root")
+            f = ROOT.TFile(path + "hists_isrjet_tau21{ddt}slices.root".format(ddt=ddt))
         else:
-            f = ROOT.TFile(path + "hists_isrgamma_tau21distributions.root")
+            f = ROOT.TFile(path + "hists_isrgamma_tau21{ddt}distributions.root".format(ddt=ddt))
             pass
-        
+
         if isrjet:
             slices = {
                 'pt': [
@@ -469,7 +550,7 @@ def main ():
             pass
 
         category_names = ["[%.0f, %.0f] GeV" % (slices['m'][i][0], slices['m'][i][1]) for i in range(len(slices['m']))]
-        
+
         # Draw
         for i, hist in enumerate(histograms):
             name = hist.GetName()
@@ -484,8 +565,8 @@ def main ():
             pass
 
         # Decorations
-        c.xlabel('Signal jet #tau_{21}^{DDT}')
-        c.ylabel('Jets (normalised to unit)')
+        c.xlabel('Signal jet #tau_{21}^{%s}' % (ddt.upper()))
+        c.ylabel('Fraction of events')
         c.text(["#sqrt{s} = 13 TeV", "%s selection" % ('Jet' if isrjet else 'Photon')], qualifier="Simulation " + qualifier)
         c.padding(0.50)
 
@@ -498,12 +579,12 @@ def main ():
                  ymax=ymax, xmin=0.19)
 
         if args.show: c.show()
-        if args.save: c.save('plots/paperplot_%s_tau21distribution.pdf' % ('jet' if isrjet else 'gamma'))
+        if args.save: c.save('plots/paperplot_%s_tau21%sdistribution.pdf' % ('jet' if isrjet else 'gamma', ddt))
         pass
 
     return
-    
-    
+
+
 # Main function call.
 if __name__ == '__main__':
     main()

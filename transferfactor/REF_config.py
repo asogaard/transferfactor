@@ -13,14 +13,12 @@ import numpy as np
 config = {
 
     # Base path for input files
-    #'base_path' : '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/outputObjdef/2017-06-22/',
+    'base_path' : '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/outputObjdef/2017-06-22/',
+    #'base_path' : '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/outputObjdef/2017-06-19/',
     #'base_path' : '/afs/cern.ch/user/a/asogaard/Analysis/2016/BoostedJetISR/AnalysisTools/outputObjdef/',
-    #'base_path' : '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/outputObjdef/2017-07-23/',
-    'base_path' : '/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/outputObjdef/2017-08-06/',
 
     # Path to cross-sections file
-    #'xsec_file' : '/afs/cern.ch/user/a/asogaard/public/Analysis/2016/BoostedJetISR/sampleInfo.csv',
-    'xsec_file' : '/afs/cern.ch/user/a/asogaard/Analysis/2016/BoostedJetISR/AnalysisTools/share/sampleInfo.csv',
+    'xsec_file' : '/afs/cern.ch/user/a/asogaard/public/Analysis/2016/BoostedJetISR/sampleInfo.csv',
 
     # Name of tree from which to read input data
     'tree'      : 'BoostedJet+ISRgamma/Nominal/EventSelection/Pass/NumLargeRadiusJets/Postcut',
@@ -55,8 +53,7 @@ config = {
         ],
 
     # Jet mas spectrum bin edges
-    #'massbins' : np.linspace(50, 300, 50 + 1, endpoint=True),
-    'massbins': np.array([50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120, 126, 132, 138, 145, 152, 159, 167, 175, 183, 191, 200, 210, 220, 232, 245, 259, 274, 300], dtype=float),
+    'massbins' : np.linspace(50, 300, 50 + 1, endpoint=True),
 
     }
 

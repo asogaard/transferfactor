@@ -10,10 +10,11 @@ WZ_SEARCH=false
 GBS=false
 GLOBALBACKGROUNDPLOTS=false
 DATA_DISTRIBUTIONS=false
-INTERPOLATION=true
+INTERPOLATION=false
 ACCEPTANCE=false
+TAU21DISTRIBUTIONS=false
 CUTOPTIMISATION=false
-PAPERFIGS=false
+PAPERFIGS=true
 VALIDATION=false
 
 
@@ -272,6 +273,17 @@ if $ACCEPTANCE; then
     echo "RUNNING SIGNAL ACCEPTANCE"
 
     python examples/acceptance.py --save > logs/log_acceptance.txt &
+    wait
+fi
+
+
+# tau21(DDT) distributions
+# ------------------------------------------------------------------------------
+
+if $TAU21DISTRIBUTIONS; then
+    echo "RUNNING TAU21(DDT) DISTRIBUTIONS"
+
+    python examples/tau21distributions.py --save > logs/log_tau21distributions.txt &
     wait
 fi
 

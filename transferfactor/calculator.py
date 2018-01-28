@@ -498,7 +498,7 @@ class calculator (object):
 
         msk_VR = (np.abs(bincentres - self._mass) / self._mass < 0.3) & \
                  (np.abs(bincentres - self._mass) / self._mass > 0.2)
-        a_dev = np.abs(a_data - a_est) / np.sqrt(np.square(a_stat) + np.square(a_syst))
+        a_dev = np.abs(a_data - a_est) / np.sqrt(np.square(a_stat) + np.square(a_syst) + eps)
         delta = np.mean(a_dev[msk_VR])
 
         self._shift = max(1, delta)

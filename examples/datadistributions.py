@@ -44,7 +44,7 @@ except ImportError:
 # Command-line arguments parser
 import argparse
 
-parser = argparse.ArgumentParser(description='Perform W/Z test search.')
+parser = argparse.ArgumentParser(description='Compute distributions for search plots')
 
 parser.add_argument('--mass', dest='mass', type=float,
                     required=True,
@@ -80,9 +80,17 @@ def main ():
         'Z':    glob.glob(tf.config['base_path'] + 'objdef_MC_30544*.root'),
         'sfl':  glob.glob(tf.config['base_path'] + 'objdef_TF_%d_signalfail.root' % TF_DSID),
         }
+
+    #for key, arr in files.iteritems():
+    #    print " -- %3s: %3d" % (key, len(arr))
+    #    pass
     
-    if 0 in map(len, files.values()) and signal:
-        warning("No files found.")
+    #if 0 in map(len, [files[key] for key in ['bkg', 'sig', 'W', 'Z']]) and signal: # ..., files.values()
+    if 0 in map(len, files.values()) and signal: # ..., files.values()
+        warning("Files not found for all categories in '%s':" % tf.config['base_path'])
+        for key, arr in files.iteritems():
+            warning("-- %-4s: %3d" % (key, len(arr)))
+            pass
         return
     
     data      = {key: loadData(files[key], tf.config['finaltree'],                               prefix=tf.config['prefix']) for key in files}   
@@ -98,13 +106,14 @@ def main ():
     # Only needs to be done for 'signal', for 'nominal' syst. variation
     for comp in ['sig', 'W', 'Z']:
         if comp == 'sig' and not signal: continue
-        data[comp] = append_fields(data[comp], 'DSID', np.zeros((data[comp].size,)), dtypes=int)
-        for idx in info[comp]['id']:    
-            msk = (data[comp]['id'] == idx) # Get mask of all 'data' entries with same id, i.e. from same file
-            DSID = info[comp]['DSID'][idx]  # Get DSID for this file
-            data[comp]['weight'][msk] *= xsec[DSID] # Scale by cross section x filter eff. for this DSID
-            data[comp]['DSID']  [msk] = DSID        # Store DSID
-            pass
+        data[comp] = scale_weights(data[comp], info[comp], xsec)
+        #data[comp] = append_fields(data[comp], 'DSID', np.zeros((data[comp].size,)), dtypes=int)
+        #for idx in info[comp]['id']:    
+        #    msk = (data[comp]['id'] == idx) # Get mask of all 'data' entries with same id, i.e. from same file
+        #    DSID = info[comp]['DSID'][idx]  # Get DSID for this file
+        #    data[comp]['weight'][msk] *= xsec[DSID] # Scale by cross section x filter eff. for this DSID
+        #    data[comp]['DSID']  [msk] = DSID        # Store DSID
+        #    pass
         # @TODO: k-factors?
         pass
     

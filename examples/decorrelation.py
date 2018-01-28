@@ -278,8 +278,8 @@ def main ():
         for xvar, yvar in itertools.product(xvars, yvars):
 
             # Save outputs for harmonised plotting
-            if itreename == 2 and yvar == 'tau21DDT' and xvar == 'm':
-                outfile = ROOT.TFile('hists_isrgamma_decorrelation.root', 'RECREATE')
+            if itreename == 2 and yvar.startswith('tau21') and xvar in  ['m', 'rhoDDT']:
+                outfile = ROOT.TFile('hists_isrgamma_decorrelation_{}_vs_{}.root'.format(yvar, xvar), 'RECREATE')
                 profname = 'profile_{{name:s}}__{yvar:s}_vs_{xvar:s}__pT_{{ptmin:d}}_{{ptmax:d}}_GeV'
                 profname = profname.format(yvar=yvar, xvar=xvar)
                 print ">" * 80

@@ -62,6 +62,9 @@ def main ():
     # Parse command-line arguments
     args = parser.parse_args()
 
+    # Set correct weighting
+    ROOT.TH1.SetDefaultSumw2(True)
+
 
     # Setup.
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
@@ -72,16 +75,16 @@ def main ():
     files = {
         'data': glob.glob(tf.config['base_path'] + 'objdef_data_*.root'),
         'bkg':  glob.glob(tf.config['base_path'] + 'objdef_TF_%d.root' % signal_DSID),
-        'sig':  glob.glob(tf.config['base_path'] + 'objdef_MC_3054*.root'),
+        #'sig':  glob.glob(tf.config['base_path'] + 'objdef_MC_3054*.root'),
         'W':    glob.glob(tf.config['base_path'] + 'objdef_MC_30543*.root'),
         'Z':    glob.glob(tf.config['base_path'] + 'objdef_MC_30544*.root'),
         'sfl':  glob.glob(tf.config['base_path'] + 'objdef_TF_%d_signalfail.root' % signal_DSID),
         }
-    
+
     if 0 in map(len, files.values()):
         warning("No files found.")
         return
-
+                 
     data      = {key: loadData(files[key], tf.config['finaltree'],                               prefix=tf.config['prefix']) for key in files}   
     data_up   = {key: loadData(files[key], tf.config['finaltree'].replace('Nominal', 'TF_UP'),   prefix=tf.config['prefix']) for key in ['bkg', 'sfl']} 
     data_down = {key: loadData(files[key], tf.config['finaltree'].replace('Nominal', 'TF_DOWN'), prefix=tf.config['prefix']) for key in ['bkg', 'sfl']} 
@@ -92,7 +95,7 @@ def main ():
     
     # Append new DSID field # @TODO: Make more elegant?
     # Only needs to be done for 'signal', for 'nominal' syst. variation
-    for comp in ['sig', 'W', 'Z']:
+    for comp in ['W', 'Z']:  # 'sig'
         data[comp] = append_fields(data[comp], 'DSID', np.zeros((data[comp].size,)), dtypes=int)
         for idx in info[comp]['id']:    
             msk = (data[comp]['id'] == idx) # Get mask of all 'data' entries with same id, i.e. from same file
@@ -100,7 +103,6 @@ def main ():
             data[comp]['weight'][msk] *= xsec[DSID] # Scale by cross section x filter eff. for this DSID
             data[comp]['DSID']  [msk] = DSID        # Store DSID
             pass
-        # @TODO: k-factors?
         data[comp]['weight'] *= tf.config['lumi'] # Scale all events (MC) by luminosity
         pass
 
@@ -108,6 +110,14 @@ def main ():
     if data['data'].size == 0:
         warning("No data was loaded.")
         return 
+
+    # k-factors
+    kfactor = { 'W': 0.7838,
+                'Z': 1.3160 }
+
+    data['W']['weight'] *= kfactor['W']
+    data['Z']['weight'] *= kfactor['Z']
+    data['sig'] = np.concatenate((data['W'], data['Z']))
 
 
     # Plotting pre-fit jet mass spectrum
@@ -121,6 +131,7 @@ def main ():
                                          [True,  True,  False, True]):
 
         if not prefit:
+            print "#"* 20 , bestfit_mu, "#"*20
             mu = bestfit_mu[0]
             pass
 
@@ -132,13 +143,15 @@ def main ():
         p0, p1 = c.pads()
 
         # -- Histograms: Main pad
-        bins = np.linspace(50, 110, 30 + 1, endpoint=True) # tf.config['massbins']
-        
+        bins = np.linspace(50, 112, 31 + 1, endpoint=True) # tf.config['massbins']
+
         h_bkg      = c.hist(data     ['bkg']['m'], bins=bins, weights=data     ['bkg']['weight'], display=False)
         h_bkg_up   = c.hist(data_up  ['bkg']['m'], bins=bins, weights=data_up  ['bkg']['weight'], display=False)
         h_bkg_down = c.hist(data_down['bkg']['m'], bins=bins, weights=data_down['bkg']['weight'], display=False)
 
-        h_sig  = c.hist(data['sig']['m'], bins=bins, weights=data['sig']['weight'], scale=mu, display=False)
+        h_sig  = c.hist(data['sig']['m'], bins=bins, weights=data['sig']['weight'],
+                        scale=mu,
+                        display=False)
 
         h_sfl      = c.hist(data     ['sfl']['m'], bins=bins, weights=data     ['sfl']['weight'], scale=mu, display=False)
         h_sfl_up   = c.hist(data_up  ['sfl']['m'], bins=bins, weights=data_up  ['sfl']['weight'], scale=mu, display=False)
@@ -155,10 +168,12 @@ def main ():
                          fillcolor=ROOT.kAzure + 7, 
                          label='Background pred.')
         
-        h_Z = c.stack(data['Z']['m'], bins=bins, weights=data['Z']['weight'], scale=mu,
+        h_Z = c.stack(data['Z']['m'], bins=bins, weights=data['Z']['weight'],
+                      scale=mu,
                       fillcolor=ROOT.kAzure + 3,
                       label="Z + #gamma  (#times #mu)")
-        h_W = c.stack(data['W']['m'], bins=bins, weights=data['W']['weight'], scale=mu,
+        h_W = c.stack(data['W']['m'], bins=bins, weights=data['W']['weight'],
+                      scale=mu,
                       fillcolor=ROOT.kAzure + 2,
                       label="W + #gamma (#times #mu)")
         
@@ -168,13 +183,31 @@ def main ():
                        label='Stat. uncert.')
 
         h_bkg_up   = c.hist(h_bkg_up,
-                            linecolor=ROOT.kGreen + 1, linestyle=2, option='HIST',
+                            linecolor=ROOT.kRed + 1, linestyle=2, option='HIST',
                             label='TF syst. uncert.')
         h_bkg_down = c.hist(h_bkg_down,
                             linecolor=ROOT.kGreen + 1, linestyle=2, option='HIST')
     
         h_data = c.plot(data['data']['m'], bins=bins, weights=data['data']['weight'],
                         label='Data')
+
+
+        # Manuall check chi2 for nominal systematic
+        """
+        if not fit:
+            chi2 = 0.
+            chi2_data = 0.
+            for ibin in range(1, h_data.GetXaxis().GetNbins() + 1):
+                stat_data = h_data.GetBinError(ibin)
+                cont_data = h_data.GetBinContent(ibin)
+                cont_bkg  = h_bkg .GetBinContent(ibin)
+                cont_sig  = h_sig .GetBinContent(ibin)
+                diff = np.abs(cont_data - (cont_bkg + cont_sig))
+                chi2 +=  np.square(diff / stat_data)
+                pass
+            print "[INFO] mu = {:.2f} | chi2 = {:.1f}".format(mu, chi2)
+            pass
+            """
 
         # -- Histograms: Ratio pad
         c.ratio_plot((h_sig,      h_sum), option='HIST', offset=1, fillcolor=ROOT.kAzure + 2)
@@ -245,6 +278,12 @@ def main ():
                     h_bkg_up  .Clone('h_save_up'),
                     ]
 
+            hdata_save = [
+                    h_data.Clone('hdata_save_down'),
+                    h_data.Clone('hdata_save_nom'),
+                    h_data.Clone('hdata_save_up'),
+                    ]
+
             hsfl_save = [
                     h_sfl_down.Clone('h_sfl_down'),
                     h_sfl     .Clone('h_sfl_nom'),
@@ -255,15 +294,16 @@ def main ():
 
             for variation in range(3):
 
-                print "Variation: " + ("Nominal" if variation == 1 else ("Up" if variation == 0 else "Down"))
+                print "Variation: " + ("Nominal" if variation == 1 else ("Down" if variation == 0 else "Up"))
 
                 # Get correct histogram for this variation
-                h_bkg_use = hs_save  [variation]
-                h_sfl_use = hsfl_save[variation]
-                
+                h_bkg_use  = hs_save   [variation]
+                h_sfl_use  = hsfl_save [variation]
+                h_data_use = hdata_save[variation]
+
                 # -- Define jet mass variable
-                mJ = ROOT.RooRealVar('mJ', 'mJ', 50, 300)
-                mJ.setBins(50)
+                mJ = ROOT.RooRealVar('mJ', 'mJ', 50, 112)
+                mJ.setBins(31)
                 
                 # -- Define histograms
                 rdh_bkg = ROOT.RooDataHist('rdh_bkg', 'rdh_bkg', ROOT.RooArgList(mJ), h_bkg_use)
@@ -281,27 +321,32 @@ def main ():
                 n_sfl = ROOT.RooRealVar('n_sfl', 'n_sfl', h_sfl_use.Integral())
                 
                 # -- Define signal strength and constant(s)
-                mu   = ROOT.RooRealVar('mu',   'mu', 1, 0, 5)
-                neg1 = ROOT.RooRealVar('neg1', 'neg1', -1)
+                v_mu   = ROOT.RooRealVar('v_mu',   'v_mu', 1, 0, 5)
+                v_neg1 = ROOT.RooRealVar('v_neg1', 'v_neg1', -1)
                 
                 # -- Define fittable normalisation factors
                 c_bkg = ROOT.RooFormulaVar('c_bkg', 'c_bkg', '@0',           ROOT.RooArgList(n_bkg))
-                c_sig = ROOT.RooFormulaVar('c_sig', 'c_sig', '@0 * @1',      ROOT.RooArgList(mu, n_sig))
-                c_sfl = ROOT.RooFormulaVar('c_sfl', 'c_sfl', '@0 * @1 * @2', ROOT.RooArgList(neg1, mu, n_sfl))
+                c_sig = ROOT.RooFormulaVar('c_sig', 'c_sig', '@0 * @1',      ROOT.RooArgList(v_mu, n_sig))
+                c_sfl = ROOT.RooFormulaVar('c_sfl', 'c_sfl', '@0 * @1 * @2', ROOT.RooArgList(v_neg1, v_mu, n_sfl))
                 
                 # -- Construct combined pdf
                 pdf = ROOT.RooAddPdf('pdf', 'pdf', ROOT.RooArgList(rhp_bkg, rhp_sig, rhp_sfl), ROOT.RooArgList(c_bkg, c_sig, c_sfl))
                 
                 # -- Construct data histogram
-                rdh_data = ROOT.RooDataHist('rdh_data', 'rdh_data', ROOT.RooArgList(mJ), h_data)
+                rdh_data = ROOT.RooDataHist('rdh_data', 'rdh_data', ROOT.RooArgList(mJ), h_data_use)
                 
                 # -- Fit pdf to data histogram
-                pdf.chi2FitTo(rdh_data, ROOT.RooLinkedList())
-                
-                print "Best fit mu: %.3f +/- %.3f" % (mu.getValV(), mu.getError())
-                bestfit_mu.append( (mu.getValV(), mu.getError()) )
+                #pdf.fitTo(rdh_data)
+                chi2Fit = ROOT.RooChi2Var("chi2","chi2", pdf, rdh_data, ROOT.RooFit.Extended())
+                minuit = ROOT.RooMinuit (chi2Fit)
+                minuit.migrad()
+                minuit.hesse()
+                r2 = minuit.save()
+
+                bestfit_mu.append( (v_mu.getValV(), v_mu.getError()) )
                 pass
 
+            print "("* 10, bestfit_mu, ")" * 10
             bestfit_mu = bestfit_mu[1][0], np.sqrt(np.power(abs(bestfit_mu[0][0] - bestfit_mu[2][0]) / 2., 2.) + np.power(bestfit_mu[1][1], 2.))
             pass
 

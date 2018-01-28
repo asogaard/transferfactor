@@ -89,6 +89,14 @@ def main ():
         308367: 48000,
         }
 
+    genfilteff = {
+        308363: 2.9141e-01, 
+        308364: 1.3795e-01, 
+        308365: 7.5920e-02,
+        308366: 4.5985e-02,
+        308367: 2.9914e-02,
+        }
+
     categories = dict()
 
     # Loop signal mass points
@@ -107,8 +115,8 @@ def main ():
             precut  = f.Get('BoostedJet+ISRgamma/{cat}/EventSelection/Pass/Jet_tau21DDT/Precut' .format(cat=cat))
             postcut = f.Get('BoostedJet+ISRgamma/{cat}/EventSelection/Pass/Jet_tau21DDT/Postcut'.format(cat=cat))
 
-            acceptance               [DSID][cat] = precut .GetEntries() / float(base[DSID])
-            acceptanceTimesEfficiency[DSID][cat] = postcut.GetEntries() / float(base[DSID])
+            acceptance               [DSID][cat] = precut .GetEntries() / float(base[DSID]) * genfilteff[DSID]
+            acceptanceTimesEfficiency[DSID][cat] = postcut.GetEntries() / float(base[DSID]) * genfilteff[DSID]
             pass
         pass
 
