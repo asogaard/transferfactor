@@ -625,23 +625,55 @@ class calculator (object):
         # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
         X1, X2 = np.meshgrid(*self._config['centres']) # (*self._config['axes'])
+        _, x_pT = np.meshgrid(*self._config['centres'])
 
         # Get TF weights on mesh
         X = np.column_stack((X1.ravel(), X2.ravel()))
-        TF_pred = asyncPredict(self._clf, X, quiet=True, num_processes=1).reshape(self._TF_CR_mean.shape)
+        #TF_pred = asyncPredict(self._clf, X, quiet=True,
+        #num_processes=1).reshape(self._TF_CR_mean.shape)
+        # @TEMP
+        TF_pred, TF_err = asyncPredict(self._clf, X, quiet=True, num_processes=1, eval_MSE=True)
+        TF_pred = TF_pred.reshape(self._TF_CR_mean.shape)
+        TF_err  = np.sqrt(TF_err).reshape(self._TF_CR_mean.shape)  # Variance to std.
+        if self._shift is not None:
+            print "========= APPLYING TF UNCERT. SCALE FACTOR: {:.3f} ==========".format(self._shift)
+            TF_err *= self._shift
+            pass
         
         X1, X2 = np.meshgrid(*self._config['axes']) # (*self._config['axes'])
 
         # Compute pulls
         TF_CR_pulls = np.zeros_like(self._TF_CR_mean)
+        err_SR = np.sqrt(np.square(self._TF_SR_err) + np.square(TF_err)) # @TEMP
+        err_CR = np.sqrt(np.square(self._TF_CR_err) + np.square(TF_err)) # @TEMP
         msk = (self._TF_CR_err > 0)
-        TF_CR_pulls[msk] = (self._TF_CR_mean[msk] - TF_pred[msk])/self._TF_CR_err[msk]
+        #print ">>", np.mean(np.abs(self._TF_CR_err))
+        #print ">>", np.mean(np.abs(TF_err))
+        #print ">>", np.mean(np.abs(err_CR))
+        #print "-" * 40
+        #print ">>", np.mean(np.abs(self._TF_CR_err[msk]))
+        #print ">>", np.mean(np.abs(TF_err[msk]))
+        #print ">>", np.mean(np.abs(err_CR[msk]))
+
+        # TF_CR_pulls[msk] = (self._TF_CR_mean[msk] -
+        # TF_pred[msk])/self._TF_CR_err[msk]
+        # @TEMP
+        TF_CR_pulls[msk] = (self._TF_CR_mean[msk] - TF_pred[msk])/err_CR[msk]
+        msk_outlier_CR = np.abs(TF_CR_pulls) > 3.
 
         TF_SR_pulls = np.zeros_like(self._TF_SR_mean)
+        non_closure_correction = 1.
         if self._window is not None:
             msk = (self._TF_SR_err > 0)
-            TF_SR_pulls[msk] = (self._TF_SR_mean[msk] - TF_pred[msk])/self._TF_SR_err[msk]
+            #TF_SR_pulls[msk] = (self._TF_SR_mean[msk] -
+            #TF_pred[msk])/self._TF_SR_err[msk]
+            # @TEMP
+            TF_SR_pulls[msk] = (self._TF_SR_mean[msk] - TF_pred[msk])/err_SR[msk]
+            msk_outlier_SR = np.abs(TF_SR_pulls) > 3.
             pass
+
+        print "== Outliers in CR (pT):", np.exp(x_pT[msk_outlier_CR]).mean()
+        print "== Outliers in SR (pT):", np.exp(x_pT[msk_outlier_SR]).mean()
 
         # Plot
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, sharex = True, sharey = True, figsize = (10,8))
@@ -687,8 +719,19 @@ class calculator (object):
 
         c2 = ap.canvas(batch=not show)
        
-        h_CR_pulls = c2.hist(TF_CR_pulls[(self._TF_CR_err > 0)], bins=bins, normalise=True, display=False)
-        h_SR_pulls = c2.hist(TF_SR_pulls[(self._TF_SR_err > 0)], bins=bins, normalise=True, display=False)
+        msk_CR = (self._TF_CR_err > 0) & (np.exp(x_pT) < 400.)
+        msk_SR = (self._TF_SR_err > 0) & (np.exp(x_pT) < 400.)
+        print "Number of CR bins with pT < 400:", np.sum(msk_CR)
+        print "Number of SR bins with pT < 400:", np.sum(msk_SR)
+        pulls_CR_mean = TF_CR_pulls[msk_CR].mean()
+        pulls_CR_std  = TF_CR_pulls[msk_CR].std()
+        pulls_CR_num  = float(len(TF_CR_pulls[msk_CR]))
+        pulls_SR_mean = TF_SR_pulls[msk_SR].mean()
+        pulls_SR_std  = TF_SR_pulls[msk_SR].std()
+        pulls_SR_num  = float(len(TF_CR_pulls[msk_SR]))
+
+        h_CR_pulls = c2.hist(TF_CR_pulls[msk_CR], bins=bins, normalise=True, display=False)
+        h_SR_pulls = c2.hist(TF_SR_pulls[msk_SR], bins=bins, normalise=True, display=False)
 
         # Fitting
         f_CR_pulls = ROOT.TF1('f_CR_pulls', 'gaus', -3, 3)
@@ -730,13 +773,17 @@ class calculator (object):
         xmin = 0.20
         step = 0.05
         legend = ROOT.TLegend(xmin, ymax - (4 if not self._mass else 7) * step, 0.5, ymax)
-        legend.AddEntry(h_CR_pulls, "Fit region:",         'L')
+        legend.AddEntry(h_CR_pulls, "Fit region:", 'L')
         legend.AddEntry(None,       "  Mean: #scale[0.5]{ }%.2f #pm %.2f" % (f_CR_pulls.GetParameter(1), f_CR_pulls.GetParError(1)), '')
         legend.AddEntry(None,       "  Width: %.2f #pm %.2f" %              (f_CR_pulls.GetParameter(2), f_CR_pulls.GetParError(2)), '')
+        legend.AddEntry(None,       "  Avg.: #scale[0.5]{ }%.2f #pm %.2f" % (pulls_CR_mean, pulls_CR_std / np.sqrt(pulls_CR_num)))
+        legend.AddEntry(None,       "  RMS: #scale[0.5]{ }%.2f " % (pulls_CR_std))
         if self._mass:
             legend.AddEntry(h_SR_pulls, "Interp. region:", 'L')
             legend.AddEntry(None,       "  Mean: #scale[0.5]{ }%.2f #pm %.2f" % (f_SR_pulls.GetParameter(1), f_SR_pulls.GetParError(1)), '')
             legend.AddEntry(None,       "  Width: %.2f #pm %.2f" %              (f_SR_pulls.GetParameter(2), f_SR_pulls.GetParError(2)), '')
+            legend.AddEntry(None,       "  Avg.: #scale[0.5]{ }%.2f #pm %.2f" % (pulls_SR_mean, pulls_SR_std / np.sqrt(pulls_SR_num)))
+            legend.AddEntry(None,       "  RMS: #scale[0.5]{ }%.2f " % (pulls_SR_std))
             pass
         legend.AddEntry(f_CR_pulls, "Central fit", 'L')
         legend.Draw()

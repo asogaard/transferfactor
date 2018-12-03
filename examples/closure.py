@@ -113,11 +113,14 @@ def main ():
     calc.mass   = args.mass
     calc.window = args.window
     # ... calc.partialbins, calc.emptybins, ...
-    calc.fit() # ...(theta=0.5)
+    calc.fit()
     w_nom  = calc.weights(data[msk_fail])
-    w_up   = calc.weights(data[msk_fail], shift=+1)
-    w_down = calc.weights(data[msk_fail], shift=-1)
-    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/closure_')
+    w_up   = calc.weights(data[msk_fail], shift=+1.0)
+    w_down = calc.weights(data[msk_fail], shift=-1.0)
+    # @TEMP
+    #calc.fullfit()
+    #w_nom, w_up, w_down = calc.fullweights(data[msk_fail])
+    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/closure_temp_restricted_')
 
 
     # Comparing jet mass distrbutions (closure)
@@ -143,7 +146,40 @@ def main ():
                         linecolor=ROOT.kGreen + 1, linestyle=2, option='HIST')
         h_data = c.plot(data['m'][msk_pass], bins=bins, weights=data['weight'][msk_pass],
                         label='Pseudo-data')
+
+
+        print "== Mass: {:.0f} GeV".format(args.mass)
+        def get_contents (h):
+            return np.asarray([h.GetBinContent(ibin) for ibin in range(1, h.GetXaxis().GetNbins() + 1)])
+        def get_errors (h):
+            return np.asarray([h.GetBinError  (ibin) for ibin in range(1, h.GetXaxis().GetNbins() + 1)])
+        bincentres = bins[:-1] + 0.5 * np.diff(bins)
         
+        cd = get_contents(h_data)
+        ed = get_errors  (h_data)
+        cb = get_contents(h_bkg)
+        eb = np.maximum(np.abs(get_contents(h_up)   - get_contents(h_bkg)),
+                        np.abs(get_contents(h_down) - get_contents(h_bkg)))
+        e = np.sqrt(ed**2 + eb**2)
+
+        msk = np.abs(bincentres - args.mass) / args.mass < args.window
+
+        pulls = (cd - cb) / e
+
+        mean = pulls[msk].mean()
+        std  = pulls[msk].std()
+        eom  = std / np.sqrt(msk.sum())
+        eom1 = 1. / np.sqrt(msk.sum())
+        sign  = abs(mean) / eom
+        sign1 = abs(mean) / eom1
+        print "Pull mean:", mean
+        print "Pull mean(abs):", np.abs(pulls[msk]).mean()
+        print "Pull std.:", std
+        print "Pull eom.:", eom
+        print "Pull sign:", sign
+        print "Pull sign (wrt. std=1.0):", sign1
+
+        #exit()
         c.ratio_plot((h_err,  h_bkg), option='E2')
         c.ratio_plot((h_up,   h_bkg), option='HIST')
         c.ratio_plot((h_down, h_bkg), option='HIST')
