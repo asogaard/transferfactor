@@ -223,12 +223,11 @@ def main ():
     print "  -- Computing signal weights"
     w_sig, _, _ = calc.fullweights(signal[msk_sig_fail])
     print "  -- Final fit done"
-    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/signalinjection_%s%s_' % ("toys_" if args.toys else "", "injected" if args.inject else "notinjected"))
+    if args.show or args.save: calc.plot(show=args.show, save=args.save, prefix='plots/new_signalinjection_%s%s_' % ("toys_" if args.toys else "", "injected" if args.inject else "notinjected"))
     
 
     # Performing signal injection test
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
-    
     if True or args.show or args.save:
         
         bestfit_mu = None
@@ -258,13 +257,31 @@ def main ():
             
             h_sig = c.hist(signal['m'][msk_sig_pass], bins=bins, weights=signal['weight'][msk_sig_pass],         scale=mu, display=False)
             h_sfl = c.hist(signal['m'][msk_sig_fail], bins=bins, weights=signal['weight'][msk_sig_fail] * w_sig, scale=mu, display=False)
+            h_data = c.plot(data['m'][msk_data_pass], bins=bins, weights=data['weight'][msk_data_pass], display=False)
             
+            for bin in range(1, h_bkg.GetXaxis().GetNbins() + 1):
+                width = float(h_bkg.GetBinWidth(bin))
+                h_bkg     .SetBinContent(bin, h_bkg     .GetBinContent(bin) / width)
+                h_bkg     .SetBinError  (bin, h_bkg     .GetBinError  (bin) / width)
+                h_bkg_up  .SetBinContent(bin, h_bkg_up  .GetBinContent(bin) / width)
+                h_bkg_up  .SetBinError  (bin, h_bkg_up  .GetBinError  (bin) / width)
+                h_bkg_down.SetBinContent(bin, h_bkg_down.GetBinContent(bin) / width)
+                h_bkg_down.SetBinError  (bin, h_bkg_down.GetBinError  (bin) / width)
+                h_sig     .SetBinContent(bin, h_sig     .GetBinContent(bin) / width)
+                h_sig     .SetBinError  (bin, h_sig     .GetBinError  (bin) / width)
+                h_sfl     .SetBinContent(bin, h_sfl     .GetBinContent(bin) / width)
+                h_sfl     .SetBinError  (bin, h_sfl     .GetBinError  (bin) / width)
+                h_data    .SetBinContent(bin, h_data    .GetBinContent(bin) / width)
+                h_data    .SetBinError  (bin, h_data    .GetBinError  (bin) / width)
+                pass
+
             if not fit:
                 h_bkg     .Add(h_sfl, -1) # Subtracting signal
                 h_bkg_up  .Add(h_sfl, -1) # --
                 h_bkg_down.Add(h_sfl, -1) # --
                 pass
 
+            c.hist(h_bkg, option='HIST', linestyle=0, fillstyle=0, fillcolor=0)  # Staring with standard histogram, not THStack, just to get y-axis to coorperate
             h_bkg = c.stack(h_bkg,
                             fillcolor=ROOT.kAzure + 7, 
                             label='Background pred.')
@@ -283,9 +300,10 @@ def main ():
             h_bkg_down = c.hist(h_bkg_down,
                                 linecolor=ROOT.kGreen + 1, linestyle=2, option='HIST')
         
-            h_data = c.plot(data['m'][msk_data_pass], bins=bins, weights=data['weight'][msk_data_pass], display=False)
             h_data = c.plot(h_data,
                             label='Pseudo-data')
+
+            c.hist(h_bkg, option='AXIS')  # Re-draw axes
 
             # -- Histograms: Ratio pad
             c.ratio_plot((h_sig,      h_sum), option='HIST', offset=1)
@@ -294,42 +312,41 @@ def main ():
             c.ratio_plot((h_bkg_down, h_sum), option='HIST')
             c.ratio_plot((h_data,     h_sum))
 
-            # -- Text
-            c.text(["#sqrt{s} = 13 TeV,  L = %s fb^{-1}" % tf.config['lumi'],
-                    "Sherpa incl. #gamma MC",
-                    "Trimmed anti-k_{t}^{R=1.0} jets",
-                    "ISR #gamma selection",
-                    "Window: %d GeV #pm %d %%" % (args.mass, 20.),
-                    ("Signal" if args.inject else "No signal") + " injected",
-                   ] + (["Using toys"] if args.toys else []), qualifier='Simulation Internal')
-
             # -- Axis labels
-            c.xlabel('Signal jet mass [GeV]')
-            c.ylabel('Events')
+            c.xlabel('Large-#it{R} jet mass [GeV]')
+            c.ylabel('Events / GeV')
             p1.ylabel('Data / Est.')
 
-            # -- Log
-            c.log()            
-
             # -- Axis limits
-            p0.padding(0.55)
-            p1.ylim(0.7, 1.3)
+            c.ylim(1.0E+00, 1.0E+06)
+            p1.ylim(0.80, 1.20)
 
             # -- Line(s)
             p1.yline(1.0)
 
             # -- Region(s)        
             c.region("SR", 0.8 * args.mass, 1.2 * args.mass)
+
+            # -- Text
+            c.text(["#sqrt{s} = 13 TeV,  %s fb^{-1}" % tf.config['lumi'],
+                    "Incl. #gamma Monte Carlo",
+                    "Photon channel",
+                    #("Signal" if args.inject else "No signal") + " injected",
+                   ] + (["Using toys"] if args.toys else []), qualifier='Simulation Internal')
             
+            # -- Log
+            c.log()            
+
+            # -- Legend
             c.legend()
-            if args.show and not fit: c.show()
-            if args.save and not fit: c.save('plots/signalinjection_%s%dGeV_pm%d_%s_%s.pdf' % (
+            if args.save and not fit: c.save('plots/new_signalinjection_%s%dGeV_pm%d_%s_%s.pdf' % (
                     "toys_" if args.toys else "",
                     args.mass, 
                     20.,
                     ('prefit_mu%d' % mu if prefit else 'postfit'),
                     ('injected' if args.inject else 'notinjected')
                     ))
+            if args.show and not fit: c.show()
 
             
             
@@ -355,7 +372,9 @@ def main ():
                     
                     # -- Define jet mass variable
                     mJ = ROOT.RooRealVar('mJ', 'mJ', 50, 300)
-                    mJ.setBins(50)
+                    #mJ.setBins(50)
+                    roobinning = ROOT.RooBinning(len(tf.config['massbins']) - 1, tf.config['massbins'])
+                    mJ.setBinning(roobinning)
                     
                     # -- Define histograms
                     rdh_bkg = ROOT.RooDataHist('rdh_bkg', 'rdh_bkg', ROOT.RooArgList(mJ), h_bkg_use)

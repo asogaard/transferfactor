@@ -3,7 +3,7 @@
 
 # Flags
 DECORRELATION=false
-CLOSURE=false
+CLOSURE=true
 INJECTION=false
 TF_OUTPUTS=false
 WZ_SEARCH=false
@@ -14,7 +14,7 @@ INTERPOLATION=false
 ACCEPTANCE=false
 TAU21DISTRIBUTIONS=false
 CUTOPTIMISATION=false
-PAPERFIGS=true
+PAPERFIGS=false
 VALIDATION=false
 
 
@@ -35,23 +35,37 @@ fi
 if $CLOSURE; then
     echo "RUNNING CLOSURE TESTS"
 
-    python examples/closure.py --mass   0 --window 0.0 --save > logs/log_closure_0GeV_pm0.txt    &
-    
-    python examples/closure.py --mass  80 --window 0.2 --save > logs/log_closure_80GeV_pm20.txt  &
-    python examples/closure.py --mass 100 --window 0.2 --save > logs/log_closure_100GeV_pm20.txt &
-    python examples/closure.py --mass 130 --window 0.2 --save > logs/log_closure_130GeV_pm20.txt &
-    python examples/closure.py --mass 160 --window 0.2 --save > logs/log_closure_160GeV_pm20.txt &
-    python examples/closure.py --mass 190 --window 0.2 --save > logs/log_closure_190GeV_pm20.txt &
-    python examples/closure.py --mass 220 --window 0.2 --save > logs/log_closure_220GeV_pm20.txt &
+    python examples/closure.py --mass 100 --window 0.2 --save > logs/log_temp_closure_100GeV_pm20.txt &
+    python examples/closure.py --mass 110 --window 0.2 --save > logs/log_temp_closure_110GeV_pm20.txt &
+    python examples/closure.py --mass 120 --window 0.2 --save > logs/log_temp_closure_120GeV_pm20.txt &
+    python examples/closure.py --mass 130 --window 0.2 --save > logs/log_temp_closure_130GeV_pm20.txt &
+    python examples/closure.py --mass 140 --window 0.2 --save > logs/log_temp_closure_140GeV_pm20.txt &
+    python examples/closure.py --mass 150 --window 0.2 --save > logs/log_temp_closure_150GeV_pm20.txt &
     wait
+    python examples/closure.py --mass 160 --window 0.2 --save > logs/log_temp_closure_160GeV_pm20.txt &
+    python examples/closure.py --mass 170 --window 0.2 --save > logs/log_temp_closure_170GeV_pm20.txt &
+    python examples/closure.py --mass 180 --window 0.2 --save > logs/log_temp_closure_180GeV_pm20.txt &
+    python examples/closure.py --mass 190 --window 0.2 --save > logs/log_temp_closure_190GeV_pm20.txt &
+    python examples/closure.py --mass 200 --window 0.2 --save > logs/log_temp_closure_200GeV_pm20.txt &
+    python examples/closure.py --mass 210 --window 0.2 --save > logs/log_temp_closure_210GeV_pm20.txt &
+    python examples/closure.py --mass 220 --window 0.2 --save > logs/log_temp_closure_220GeV_pm20.txt &
 
-    python examples/closure.py --mass  80 --window 0.3 --save > logs/log_closure_80GeV_pm30.txt  &
-    python examples/closure.py --mass 100 --window 0.3 --save > logs/log_closure_100GeV_pm30.txt &
-    python examples/closure.py --mass 130 --window 0.3 --save > logs/log_closure_130GeV_pm30.txt &
-    python examples/closure.py --mass 160 --window 0.3 --save > logs/log_closure_160GeV_pm30.txt &
-    python examples/closure.py --mass 190 --window 0.3 --save > logs/log_closure_190GeV_pm30.txt &
-    python examples/closure.py --mass 220 --window 0.3 --save > logs/log_closure_220GeV_pm30.txt &
-    wait
+    # @TEMP
+    #python examples/closure.py --mass  80 --window 0.2 --save > logs/log_closure_80GeV_pm20.txt  &
+    #python examples/closure.py --mass 100 --window 0.2 --save > logs/log_closure_100GeV_pm20.txt &
+    #python examples/closure.py --mass 130 --window 0.2 --save > logs/log_closure_130GeV_pm20.txt &
+    #python examples/closure.py --mass 160 --window 0.2 --save > logs/log_closure_160GeV_pm20.txt &
+    #python examples/closure.py --mass 190 --window 0.2 --save > logs/log_closure_190GeV_pm20.txt &
+    #python examples/closure.py --mass 220 --window 0.2 --save > logs/log_closure_220GeV_pm20.txt &
+    #wait
+
+    #python examples/closure.py --mass  80 --window 0.3 --save > logs/log_closure_80GeV_pm30.txt  &
+    #python examples/closure.py --mass 100 --window 0.3 --save > logs/log_closure_100GeV_pm30.txt &
+    #python examples/closure.py --mass 130 --window 0.3 --save > logs/log_closure_130GeV_pm30.txt &
+    #python examples/closure.py --mass 160 --window 0.3 --save > logs/log_closure_160GeV_pm30.txt &
+    #python examples/closure.py --mass 190 --window 0.3 --save > logs/log_closure_190GeV_pm30.txt &
+    #python examples/closure.py --mass 220 --window 0.3 --save > logs/log_closure_220GeV_pm30.txt &
+    #wait
 fi
 
 

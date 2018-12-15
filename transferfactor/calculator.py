@@ -10,7 +10,9 @@
 
 # Basic import(s)
 import sys
+from array import array as _array
 import itertools
+import numpy as np
 
 # Scientific import(s)
 try:
@@ -644,6 +646,7 @@ class calculator (object):
             pass
 
         # Plot
+        '''
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, sharex = True, sharey = True, figsize = (10,8))
         im1 = ax1.pcolormesh(X1, X2, self._TF_CR_mean,  vmin=0,  vmax=1, cmap='magma')
         _   = ax2.pcolormesh(X1, X2, TF_pred,     vmin=0,  vmax=1, cmap='magma')
@@ -678,6 +681,125 @@ class calculator (object):
         fig.colorbar(im2, cax=cbar_ax2).set_label(label='Residual pulls', size=14)
         if save: plt.savefig('./' + prefix + ('profiles_%dGeV_pm%d.pdf' % (self._mass, self._window * 100.) if self._mass else 'profiles_full.pdf'))
         if show: plt.show()
+        '''
+
+        # (1') TF profile and residuals in ROOT
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+        xaxis, yaxis = self._config['axes']
+        h1_backdrop = ROOT.TH2F('backdrop', "", 1, np.array([xaxis[0], xaxis[-1]]),
+                                                1, np.array([yaxis[0], yaxis[-1] + 0.55 * (yaxis[-1] - yaxis[0])]))
+        h1_backdrop.GetXaxis().SetTitle("Large-#it{R} jet #rho^{DDT}")
+        h1_backdrop.GetYaxis().SetTitle("Large-#it{R} jet log(p_{T}/#mu)")
+        h1_backdrop.GetYaxis().SetTitleOffset(2.)
+
+        # -- (a) Measured
+        c1a = ap.canvas(batch=not show, size=(600,600))
+        h1a = ROOT.TH2F('profile_meas', "", len(xaxis) - 1, xaxis,
+                                            len(yaxis) - 1, yaxis)
+                                
+        h1a = array2hist(self._TF_CR_mean.T, h1a)
+        h1a.GetZaxis().SetRangeUser(0., 1.0)
+        h1a.GetZaxis().SetTitle("Measured transfer factor")
+
+        c1a.pads()[0]._bare().SetRightMargin(0.2)
+
+        c1a.hist2d(h1_backdrop, option='AXIS')
+        c1a.hist2d(h1a,         option='COLZ')
+        c1a.hist2d(h1_backdrop, option='AXIS')
+
+        c1a.text(["#sqrt{s} = 13 TeV,  %.1f fb^{-1}" % (36.1)] + 
+                 (["Incl. #gamma Monte Carlo"] if MC else ["Photon channel"]) +
+                 ["No mass window" if not self._mass else \
+                     ("Window: %2d GeV #pm %d%%" % (self._mass, self._window * 100.)),
+                 ], qualifier='Simulation Internal')
+
+        
+        if save: c1a.save('./' + prefix + ('profiles_%dGeV_pm%d__meas.pdf' % (self._mass, self._window * 100.) if self._mass else 'profiles_full__meas.pdf'))
+        if show: c1a.show()
+
+
+        # -- (b) Predicted
+        c1b = ap.canvas(batch=not show, size=(600,600))
+        h1b = ROOT.TH2F('profile_pred', "", len(xaxis) - 1, xaxis,
+                                            len(yaxis) - 1, yaxis)
+                                
+        h1b = array2hist(TF_pred.T, h1b)
+        h1b.GetZaxis().SetRangeUser(0., 1.0)
+        h1b.GetZaxis().SetTitle("Transfer factor fit")
+        h1b.SetContour(501)
+
+        c1b.pads()[0]._bare().SetRightMargin(0.2)
+
+        c1b.hist2d(h1_backdrop, option='AXIS')
+        c1b.hist2d(h1b,         option='COLZ')
+        c1b.hist2d(h1_backdrop, option='AXIS')
+
+        c1b.text(["#sqrt{s} = 13 TeV,  %.1f fb^{-1}" % (36.1)] + 
+                 (["Incl. #gamma Monte Carlo"] if MC else ["Photon channel"]) +
+                 ["No mass window" if not self._mass else \
+                     ("Window: %2d GeV #pm %d%%" % (self._mass, self._window * 100.)),
+                 ], qualifier='Simulation Internal')
+
+        
+        if save: c1b.save('./' + prefix + ('profiles_%dGeV_pm%d__pred.pdf' % (self._mass, self._window * 100.) if self._mass else 'profiles_full__pred.pdf'))
+        if show: c1b.show()
+
+        # -- (c) Pulls
+        rgbs = [
+            (103,   0,  31),
+            (178,  24,  43),
+            (214,  96,  77),
+            (244, 165, 130),
+            (253, 219, 199),
+            (247, 247, 247),
+            (247, 247, 247),
+            (209, 229, 240),
+            (146, 197, 222),
+            ( 67, 147, 195),
+            ( 33, 102, 172),
+            (  5,  48,  97),
+            ]
+        red, green, blue = zip(*rgbs)
+        red   = [r/255. for r in red]
+        green = [g/255. for g in green]
+        blue  = [b/255. for b in blue]
+        stops = np.linspace(0, 1, len(rgbs), endpoint=True)
+
+        s = _array('d', stops)
+        r = _array('d', red)
+        g = _array('d', green)
+        b = _array('d', blue)
+        
+        npoints = len(s)
+        ncontours = 18
+        ROOT.TColor.CreateGradientColorTable(npoints, s, r, g, b, ncontours)
+        ROOT.gStyle.SetNumberContours(ncontours)
+
+
+        c1c = ap.canvas(batch=not show, size=(600,600))
+        h1c = ROOT.TH2F('profile_pull', "", len(xaxis) - 1, xaxis,
+                                            len(yaxis) - 1, yaxis)
+                                
+        h1c = array2hist(TF_CR_pulls.T, h1c)
+        h1c.GetZaxis().SetRangeUser(-3., 3.)
+        h1c.SetContour(18)
+        h1c.GetZaxis().SetTitle("Transfer factor fit residual pull, (n_{MC} #minus n_{TF})/#sigma_{MC}")
+
+        c1c.pads()[0]._bare().SetRightMargin(0.2)
+
+        c1c.hist2d(h1_backdrop, option='AXIS')
+        c1c.hist2d(h1c,         option='COLZ')
+        c1c.hist2d(h1_backdrop, option='AXIS')
+
+        c1c.text(["#sqrt{s} = 13 TeV,  %.1f fb^{-1}" % (36.1)] + 
+                 (["Incl. #gamma Monte Carlo"] if MC else ["Photon channel"]) +
+                 ["No mass window" if not self._mass else \
+                     ("Window: %2d GeV #pm %d%%" % (self._mass, self._window * 100.)),
+                 ], qualifier='Simulation Internal')
+
+        
+        if save: c1c.save('./' + prefix + ('profiles_%dGeV_pm%d__pull.pdf' % (self._mass, self._window * 100.) if self._mass else 'profiles_full__pull.pdf'))
+        if show: c1c.show()
 
 
         # (2) 1D pulls
@@ -713,13 +835,11 @@ class calculator (object):
 
         c2.padding(0.5)
 
-        c2.xlabel("Transfer factor fit residual pull")
-        c2.ylabel("Number of bins (a.u.)")
+        c2.xlabel("Transfer factor fit residual pull: (n_{MC} - n_{fit}) / \sigma_{MC}")
+        c2.ylabel("Fraction of bins")
 
-        c2.text(["#sqrt{s} = 13 TeV,  L = %.1f fb^{-1}" % (36.1)] + 
-                 (["Sherpa incl. #gamma MC"] if MC else []) +
-                 ["Trimmed anti-k_{t}^{R=1.0} jets",
-                 "ISR #gamma selection"] +
+        c2.text(["#sqrt{s} = 13 TeV,  %.1f fb^{-1}" % (36.1)] + 
+                 (["Incl. #gamma Monte Carlo"] if MC else ["Photon channel"]) +
                  ["No mass window" if not self._mass else \
                      ("Window: %2d GeV #pm %d%%" % (self._mass, self._window * 100.) if self._window == 0.3 else
                       "Window: %2d GeV #pm %d%%" % (self._mass, self._window * 100.)),
