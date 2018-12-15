@@ -10,7 +10,7 @@
 """
 
 # Basic import(s)
-import sys, glob, itertools
+import re, sys, glob, itertools
 
 # Get ROOT to stop hogging the command-line options
 import ROOT
@@ -64,6 +64,125 @@ def main ():
     # Setup
     # -- Limit the number of axis digits to 4 from 5, to reduce clutter
     ROOT.TGaxis.SetMaxDigits(4)
+
+
+    # Tau21 decorrelation plots
+    # --------------------------------------------------------------------------
+
+    basedir = {
+        'isrjet':   '/eos/atlas/unpledged/group-wisc/users/lkaplan/dijetISR_all/dijetISR/plotsForNote/outputs/',
+        'isrgamma': '/afs/cern.ch/user/a/asogaard/public/dijetisr/',
+        }
+
+    plottypes = ['correlation', 'decorrelation']
+    for plottype in plottypes:
+
+        if plottype == 'decorrelation':
+            filenames = {
+                'isrjet':   'hists_isrjet_decorrelation.root',
+                'isrgamma': 'hists_isrgamma_decorrelation_tau21DDT_vs_m.root',
+            }
+        elif plottype == 'correlation':
+            filenames = {
+                'isrjet':   'hists_isrjet_correlation.root',
+                'isrgamma': 'hists_isrgamma_decorrelation_tau21_vs_rhoDDT.root'
+            }
+        else:
+            assert False
+            pass
+
+        for key, filename in filenames.iteritems():
+            # Open file
+            f = ROOT.TFile.Open(basedir[key] + filename)
+
+            # Get list of profile names
+            names = sorted(list(map(lambda tkey: tkey.GetName(), f.GetListOfKeys())))
+
+            # Load profiles
+            profiles = list()
+            for name in names:
+                
+                # Load profie
+                h = f.Get(name)
+                h.SetDirectory(0)
+
+                # Get pT range
+                m = re.search('.*\_([\d]+)\_([\d]+)\_.*', name)
+                pt = map(int, (m.group(1), m.group(2)))
+
+                # Get signal status
+                sig = ('sig' in name)
+                profiles.append((h, sig, pt))
+                pass
+
+            # Create canvas
+            c = ap.canvas(batch=not args.show)
+
+            # Plot profiles
+            colors = [ROOT.kBlack, compcolours['WHad'], compcolours['QCD']]
+            for plot_signal in [False, True]:
+                idx = 0
+                for profile, sig, pt in profiles:
+                    # Select desired class
+                    if sig != plot_signal: continue
+
+                    # Define style variables
+                    color = colors[idx]
+                    markerstyle = (24 if plot_signal else 20)
+
+                    # Plot profile
+                    c.plot(profile, markerstyle=markerstyle, markersize=1, markercolor=color, linecolor=color, option='PE', legend_option='PE', label="p_{T} #in  [%d, %d] GeV" % (pt[0], pt[1]))
+
+                    # Increment counter
+                    idx += 1
+                    pass
+
+                # Draw class-specific header
+                header = "Signal, Z'(160 GeV):" if plot_signal else "Background:"
+                if   plottype == 'decorrelation':
+                    c.legend(header=header,
+                             width=0.25, ymax = 0.38,
+                             xmin=0.17 + 0.38 * plot_signal)
+                elif plottype == 'correlation':
+                    c.legend(header=header,
+                             width=0.25, ymax = 0.38 + 0.35 * plot_signal,
+                             xmin=0.17 + 0.38 * plot_signal)
+                else:
+                    assert False
+                    pass
+                pass
+
+            # Re-draw axes on top
+            c.pads()[0]._primitives[0].Draw('AXIS SAME')
+
+            # Decorations
+            c.ylim(0, 1)
+            if   plottype == 'decorrelation':
+                c.xlim(50, 300)
+                c.xlabel("Large-#it{R} jet mass [GeV]")
+                c.ylabel("#LT#tau_{21}^{DDT}#GT")
+            elif plottype == 'correlation':
+                c.xlim(1, 6)
+                c.xlabel("Large-#it{R} jet #rho^{DDT}")
+                c.ylabel("#LT#tau_{21}^{DDT}#GT")
+            else:
+                assert False
+                pass
+
+            c.text(["#sqrt{s} = 13 TeV",
+                    "{} channel".format("Jet" if key == 'isrjet' else "Photon")],
+                    qualifier="Simulation")
+
+            # Show/save
+            if args.show:
+                c.show()
+                pass
+
+            if args.save:
+                c.save('plots/fig2_{}_{}.pdf'.format(plottype, key.replace('isr', '')))
+                pass
+            pass
+        pass
 
 
     # W/Z plots
@@ -198,7 +317,7 @@ def main ():
                 hist.SetBinError  (bin, hist.GetBinError  (bin) / float(hist.GetBinWidth(bin)))
                 pass
             return hist
-        
+
         histograms = dict()
         for name in names:
             hist = f.Get('h_mJ_' + name)
@@ -213,7 +332,7 @@ def main ():
             except:
                 # This mass point doesn't have a signal shape
                 warning("Mass point %d doesn't have a signal shape." % mass)
-                
+
                 # Try to access the interpolated signal
                 interp_path="/eos/atlas/user/a/asogaard/Analysis/2016/BoostedJetISR/StatsInputs/2017-08-06/"
                 interp_filename="{}_{:d}.root".format("sig" if isrjet else "ISRgamma_signal", mass)
@@ -222,7 +341,7 @@ def main ():
                 interp_t = interp_f.Get(interp_treename)
                 array = root_numpy.tree2array(interp_t)
                 fields = list(array.dtype.names)
-        
+
                 # -- Fill new histogram for interpolated signal
                 bins = tf.config['massbins']
                 c = ap.canvas(batch=True)
@@ -306,9 +425,9 @@ def main ():
         if isrjet: pads[1].ylim(0.98, 1.02)
         else:      pads[1].ylim(0.85, 1.15)
 
-        c.ratio_plot((h_bkg_var,  h_sum), option='E2')
-        c.ratio_plot((h_sum,      h_sum), option='E2')
-        c.ratio_plot((histograms['data'], h_sum), option='PE0X0', oob=True) 
+        pulls_stat_syst = c.ratio_plot((h_bkg_var,  h_sum), option='E2')
+        pulls_bkg_stat  = c.ratio_plot((h_sum,              h_sum), option='E2')
+        pulls_data      = c.ratio_plot((histograms['data'], h_sum), option='PE0X0', oob=True)
 
         # -- statistical test
         h_mc.Add(h_qcd)
@@ -357,6 +476,50 @@ def main ():
 
         if args.save: c.save('plots/paperplot_%s_%dGeV%s.pdf' % ('jet' if isrjet else 'gamma', mass, '_log' if log else ''))
         if args.show: c.show()
+
+
+        # Temp: Pre-fit pull plots for journal reviewer
+        if mass not in [160, 220]: continue
+        print "=" * 40
+        print "isrjet: {}, mass: {}".format(isrjet, mass)
+        pulls = list()
+        diffs = list()
+        errs  = list()
+        CRs   = list()
+        for ibin in range(1, pulls_stat_syst.GetXaxis().GetNbins() + 1):
+            # @TODO: Only in signal region?
+            CRs.append(abs(pulls_stat_syst.GetXaxis().GetBinCenter(ibin) - mass) / mass > 0.2)
+            diff     = pulls_data.GetBinContent(ibin) - 1.
+            err_bkg  = pulls_stat_syst.GetBinError(ibin)
+            err_data = pulls_data.GetBinError(ibin)
+            err      = np.sqrt( err_bkg**2 + err_data**2 )
+            pull = diff / np.sqrt( err_bkg**2 + err_data**2 )
+
+            diffs.append(diff)
+            errs .append(err)
+            pulls.append(pull)
+            pass
+        pulls_cr = [pull for cr, pull in zip(CRs, pulls) if cr]
+
+        print "CR: mean +/- rms (eom) of pulls: {} +/- {} ({})".format(np.mean(pulls_cr), np.std(pulls_cr), np.std(pulls_cr) / np.sqrt(len(pulls_cr)))
+        c1 = ap.canvas(batch=not args.show)
+        bins = np.linspace(-3, 3, 6 * 2 + 1, endpoint=True)
+        h1    = c1.hist(pulls, bins=bins, linecolor=ROOT.kRed, label='All bins')
+        h1_cr = c1.hist(pulls_cr, bins=bins, linecolor=ROOT.kBlue, linestyle=2, label='Only CR bins')
+        
+        print "==== FULL:"
+        h1   .Fit('gaus', 'V+')
+        print "\n==== CR:"
+        h1_cr.Fit('gaus', 'V+')
+
+        c1.xlabel('Pre-fit pulls')
+        c1.ylabel('Number of large-#it{R} jet mass bins')
+        c1.text(["{} channel".format('Jet' if isrjet else 'Photon'), 
+                 "Mass point: {} GeV".format(mass)], qualifier='Internal')
+        c1.legend()
+        c1.legend()
+        c1.save('plots/temp_pulls_{}_{}.pdf'.format('jet' if isrjet else 'photon', mass))
+        #c1.show()
         pass
 
 
