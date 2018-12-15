@@ -163,7 +163,7 @@ def main ():
                 c.ylabel("#LT#tau_{21}^{DDT}#GT")
             elif plottype == 'correlation':
                 c.xlim(1, 6)
-                c.xlabel("Large-#it{R} jet mass [GeV]")
+                c.xlabel("Large-#it{R} jet #rho^{DDT}")
                 c.ylabel("#LT#tau_{21}^{DDT}#GT")
             else:
                 assert False
