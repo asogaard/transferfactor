@@ -164,7 +164,7 @@ def main ():
             elif plottype == 'correlation':
                 c.xlim(1, 6)
                 c.xlabel("Large-#it{R} jet #rho^{DDT}")
-                c.ylabel("#LT#tau_{21}^{DDT}#GT")
+                c.ylabel("#LT#tau_{21}#GT")
             else:
                 assert False
                 pass
